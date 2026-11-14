@@ -1,6 +1,6 @@
 // Offline support: keeps the app's own files cached so it opens without a connection.
 // Bump VERSION whenever you change any app file so phones pick up the update.
-const VERSION = 'meal-planner-v4';
+const VERSION = 'meal-planner-v5';
 const SHELL = [
   './',
   'index.html',

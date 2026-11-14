@@ -6,7 +6,7 @@ import {
 import {
   parseIngredient, ingredientKey, displayName, guessSection, formatAmounts, addAmount, cleanLine, SECTIONS,
 } from './ingredients.js';
-import { scanImage, parseRecipeText, makeThumbnail, textToIngredients, textToMethod } from './scan.js';
+import { scanRecipe, makeThumbnail } from './scan.js';
 import { mountCropper } from './crop.js';
 
 const APP_VERSION = '1.1.0';
@@ -802,28 +802,20 @@ function openEditor(id, { onSaved } = {}) {
     msg.textContent = 'Preparing photo…';
     try {
       if (!photo) { photo = await makeThumbnail(file); drawPhoto(); }
-      const text = await scanImage(file, (p, m) => { bar.style.width = `${Math.round(p * 100)}%`; msg.textContent = m; }, { crop });
-      if (!text.trim()) {
+      const parsed = await scanRecipe(file, (p, m) => { bar.style.width = `${Math.round(p * 100)}%`; msg.textContent = m; }, { crop, target });
+      if (!parsed.text.trim()) {
         msg.textContent = 'No text found. Try again in good light, with the phone flat above the page and the box tight around the text.';
         return;
       }
-      if (target === 'ingredients') {
-        const ings = textToIngredients(text);
-        if (ings.length) append('#ed-ings', ings.join('\n'), '\n');
-        msg.textContent = `Added ${ings.length} ingredient${ings.length === 1 ? '' : 's'}. Please check them below and fix any mistakes.`;
-      } else if (target === 'method') {
-        const m = textToMethod(text);
-        if (m) append('#ed-method', m, '\n\n');
-        msg.textContent = 'Added the method. Please check it below and fix any mistakes.';
-      } else {
-        const parsed = parseRecipeText(text);
-        if (parsed.title && !field('#ed-title').value.trim()) field('#ed-title').value = parsed.title;
-        if (parsed.serves && !field('#ed-serves').value.trim()) field('#ed-serves').value = parsed.serves;
-        if (parsed.ingredients.length) append('#ed-ings', parsed.ingredients.join('\n'), '\n');
-        if (parsed.method) append('#ed-method', parsed.method, '\n\n');
-        if (!parsed.ingredients.length && !parsed.method) append('#ed-method', text.trim(), '\n\n');
-        msg.textContent = `Found ${parsed.ingredients.length} ingredient${parsed.ingredients.length === 1 ? '' : 's'}${parsed.method ? ' and a method' : ''}. Please check them below and fix any mistakes.`;
-      }
+      if (parsed.title && !field('#ed-title').value.trim()) field('#ed-title').value = parsed.title;
+      if (parsed.serves && !field('#ed-serves').value.trim()) field('#ed-serves').value = parsed.serves;
+      if (parsed.ingredients.length) append('#ed-ings', parsed.ingredients.join('\n'), '\n');
+      if (parsed.method) append('#ed-method', parsed.method, '\n\n');
+      if (target === 'auto' && !parsed.ingredients.length && !parsed.method) append('#ed-method', parsed.text.trim(), '\n\n');
+      const n = parsed.ingredients.length;
+      msg.textContent = target === 'method'
+        ? 'Added the method. Please check it below and fix any mistakes.'
+        : `Found ${n} ingredient${n === 1 ? '' : 's'}${parsed.method ? ' and a method' : ''}. Please check them below and fix any mistakes.`;
     } catch (err) {
       console.error(err);
       msg.textContent = `Couldn’t read that photo: ${err.message || err}`;
