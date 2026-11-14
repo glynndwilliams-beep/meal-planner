@@ -76,6 +76,9 @@ At this point the app works on one phone. Do step 2 to share it with your househ
 | Add something by hand | Type it in the box at the top of Shopping, e.g. `2 lemons` |
 | Change an item's shop section or amount | Tap the item name on the Shopping list |
 | Send the list to someone | **⬆️** on the Shopping tab |
+| See what you eat and when | **History** tab – most eaten, habits by meal and day, and what you haven't had for a while. Past days on the plan count as eaten. |
+| Get meal ideas | **✨ Suggest** (Plan or History tab) fills empty meals with recipes you haven't had for longest. ↻ swaps one, untick to skip, **Shuffle all** for a fresh set. |
+| Control which meal a recipe is suggested for | Edit the recipe → **Good for** breakfast / lunch / dinner |
 | Keep a copy of everything | **Settings → Save a backup file** |
 
 **Scanning tips:** good light, phone flat above the page, the whole recipe in frame. Do the ingredients page and the method page as separate photos if they're far apart. The text reader runs on the phone (photos aren't uploaded); the first scan downloads it, which takes a few seconds.

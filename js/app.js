@@ -8,7 +8,7 @@ import {
 } from './ingredients.js';
 import { scanImage, parseRecipeText, makeThumbnail } from './scan.js';
 
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
 
 const DAYS = [
   { key: 'mon', label: 'Monday' },
@@ -103,6 +103,64 @@ function addToSlot(week, slot, entry) {
   return setSlot(week, slot, [...(slotsFor(week)[slot] || []), { id: newId(), ...entry }]);
 }
 
+/* ---------------- history (past planned meals count as eaten) ---------------- */
+function buildHistory({ from = null } = {}) {
+  const today = ymd(new Date());
+  const events = [];
+  for (const [wk, doc] of state.plans) {
+    const start = fromYmd(wk);
+    for (const [slot, entries] of Object.entries(doc.slots || {})) {
+      const [dayKey, meal] = slot.split('_');
+      const i = DAYS.findIndex(d => d.key === dayKey);
+      if (i < 0) continue;
+      const date = ymd(addDays(start, i));
+      if (date > today || (from && date < from)) continue;
+      for (const e of entries || []) {
+        if (e.type === 'recipe') {
+          const r = state.recipes.get(e.recipeId);
+          events.push({ date, day: dayKey, meal, kind: 'recipe', id: e.recipeId, label: r ? r.title : 'Deleted recipe' });
+        } else if (e.text && e.text.trim()) {
+          events.push({ date, day: dayKey, meal, kind: 'text', id: `t:${e.text.trim().toLowerCase()}`, label: e.text.trim() });
+        }
+      }
+    }
+  }
+  return events;
+}
+
+/** recipeId -> { last: 'YYYY-MM-DD', count, meals: Set } over all time */
+function recipeStats() {
+  const m = new Map();
+  for (const ev of buildHistory()) {
+    if (ev.kind !== 'recipe') continue;
+    const x = m.get(ev.id) || { last: '', count: 0, meals: new Set() };
+    if (ev.date > x.last) x.last = ev.date;
+    x.count++;
+    x.meals.add(ev.meal);
+    m.set(ev.id, x);
+  }
+  return m;
+}
+
+function daysSince(dateStr) { return Math.round((fromYmd(ymd(new Date())) - fromYmd(dateStr)) / 864e5); }
+function ago(dateStr) {
+  const d = daysSince(dateStr);
+  if (d <= 0) return 'today';
+  if (d === 1) return 'yesterday';
+  if (d < 14) return `${d} days ago`;
+  if (d < 60) return `${Math.round(d / 7)} weeks ago`;
+  if (d < 730) return `${Math.round(d / 30.4)} months ago`;
+  return `${Math.round(d / 365)} years ago`;
+}
+
+/** Which meals a recipe suits: its tags, else what it has been planned for, else dinner. */
+function recipeMeals(r, stats) {
+  if (Array.isArray(r.meals) && r.meals.length) return r.meals;
+  const s = stats && stats.get(r.id);
+  if (s && s.meals.size) return [...s.meals];
+  return ['dinner'];
+}
+
 const qtyOf = item => item.qtyText || formatAmounts(item.amounts);
 const sortedRecipes = () => [...state.recipes.values()].sort((a, b) => (a.title || '').localeCompare(b.title || ''));
 const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -162,7 +220,7 @@ function render() {
   const focusId = active && active.id && view.contains(active) ? active.id : null;
   const sel = focusId && 'selectionStart' in active ? [active.selectionStart, active.selectionEnd] : null;
 
-  ({ plan: renderPlan, recipes: renderRecipes, shopping: renderShopping, settings: renderSettings })[state.tab]();
+  ({ plan: renderPlan, recipes: renderRecipes, shopping: renderShopping, history: renderHistory, settings: renderSettings })[state.tab]();
 
   if (focusId) {
     const el = document.getElementById(focusId);
@@ -189,7 +247,7 @@ function chipHtml(e, slot) {
 function renderPlan() {
   const week = ymd(state.week);
   const isThisWeek = week === ymd(mondayOf(new Date()));
-  setTop('Meal plan', isThisWeek ? '' : '<button class="btn small" data-action="this-week">This week</button>');
+  setTop('Meal plan', `${isThisWeek ? '' : '<button class="btn small" data-action="this-week">This week</button>'}<button class="btn small primary" data-action="suggest">✨ Suggest</button>`);
   const slots = slotsFor(week);
   const today = ymd(new Date());
   let html = `<div class="week-nav">
@@ -262,6 +320,202 @@ function renderShopping() {
       </div>`).join('')}</div>`;
   }
   view.innerHTML = html;
+}
+
+/* ----- History ----- */
+const PERIODS = [[3, '3 months'], [6, '6 months'], [12, '1 year'], [0, 'All time']];
+
+function countBy(events, keyFn = e => e.id) {
+  const m = new Map();
+  for (const e of events) {
+    const k = keyFn(e);
+    const x = m.get(k) || { id: e.id, label: e.label, kind: e.kind, count: 0 };
+    x.count++;
+    m.set(k, x);
+  }
+  return [...m.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+}
+
+function barsHtml(rows) {
+  const max = Math.max(...rows.map(r => r.count), 1);
+  return rows.map(r => `<div class="bar-row" title="${esc(r.label)}: ${r.count} time${r.count === 1 ? '' : 's'}">
+      <div class="bar-label ${r.kind === 'text' ? 'text-entry' : ''}">${esc(r.label)}</div>
+      <div class="bar-track"><div class="bar" style="width:${Math.max(4, (r.count / max) * 100)}%"></div></div>
+      <div class="bar-val">${r.count}</div></div>`).join('');
+}
+
+function renderHistory() {
+  setTop('History', '<button class="btn small primary" data-action="suggest">✨ Suggest</button>');
+  const months = state.historyMonths ?? 3;
+  let from = null;
+  if (months) { const d = new Date(); d.setMonth(d.getMonth() - months); from = ymd(d); }
+  const events = buildHistory({ from });
+
+  let html = `<div class="segmented" role="group" aria-label="Time period">${PERIODS.map(([m, l]) =>
+    `<button data-action="history-period" data-months="${m}" class="${m === months ? 'on' : ''}" aria-pressed="${m === months}">${l}</button>`).join('')}</div>`;
+
+  // Not had for a while: all recipes, all-time stats, never-had first
+  const stats = recipeStats();
+  const stale = sortedRecipes()
+    .map(r => ({ r, s: stats.get(r.id) }))
+    .sort((a, b) => (a.s ? a.s.last : '') .localeCompare(b.s ? b.s.last : ''));
+  const staleShown = state.showAllStale ? stale : stale.slice(0, 6);
+
+  if (events.length) {
+    const unique = new Set(events.map(e => e.id)).size;
+    const fromRecipes = Math.round(100 * events.filter(e => e.kind === 'recipe').length / events.length);
+    html += `<div class="tiles">
+      <div class="tile"><div class="num">${events.length}</div><div class="lbl">meals planned</div></div>
+      <div class="tile"><div class="num">${unique}</div><div class="lbl">different dishes</div></div>
+      <div class="tile"><div class="num">${fromRecipes}%</div><div class="lbl">from your recipes</div></div></div>`;
+  }
+
+  if (stale.length) {
+    html += `<div class="section-title">Not had for a while</div><div class="card">${staleShown.map(({ r, s }) => `
+      <div class="recipe-item">
+        <button class="grow link-row" data-action="open-recipe" data-recipe="${esc(r.id)}"><span class="t">${esc(r.title)}</span><br>
+        <span class="s">${s ? `Last had ${ago(s.last)} · ${s.count}×` : 'Never had'}</span></button>
+        <button class="btn small" data-action="plan-recipe" data-recipe="${esc(r.id)}">Plan</button>
+      </div>`).join('')}
+      ${stale.length > 6 ? `<div class="center"><button class="link-btn" data-action="toggle-stale">${state.showAllStale ? 'Show fewer' : `Show all ${stale.length}`}</button></div>` : ''}</div>`;
+  }
+
+  if (!events.length) {
+    html += `<p class="empty"><span class="big">📊</span>Nothing to show for this period yet.<br>Meals on your plan are counted here once their day has passed.</p>`;
+    view.innerHTML = html;
+    return;
+  }
+
+  html += `<div class="section-title">Most eaten</div><div class="card"><div class="card-body">${barsHtml(countBy(events).slice(0, 10))}</div></div>`;
+
+  // When: top items for each meal, and the usual pick per weekday
+  html += '<div class="section-title">When you eat what</div><div class="card"><div class="card-body stack">';
+  for (const m of MEALS) {
+    const top = countBy(events.filter(e => e.meal === m)).slice(0, 3);
+    if (!top.length) continue;
+    html += `<div><div class="habit-head">${MEAL_LABEL[m]}</div>${top.map(t => `<div class="habit"><span class="${t.kind === 'text' ? 'text-entry' : ''}">${esc(t.label)}</span><span class="muted">${t.count}×</span></div>`).join('')}</div>`;
+  }
+  const dayRows = DAYS.map(d => {
+    const evs = events.filter(e => e.day === d.key);
+    const top = countBy(evs)[0];
+    const nDates = new Set(evs.map(e => e.date)).size;
+    return top && top.count >= 3 && top.count / nDates >= 0.4 ?`<div class="habit"><span><b>${d.label}s</b> · <span class="${top.kind === 'text' ? 'text-entry' : ''}">${esc(top.label)}</span></span><span class="muted">${top.count} of ${new Set(evs.map(e => e.date)).size}</span></div>` : '';
+  }).join('');
+  if (dayRows) html += `<div><div class="habit-head">Regular days</div>${dayRows}</div>`;
+  html += '</div></div>';
+
+  view.innerHTML = html;
+}
+
+/* ----- Suggestions ----- */
+function openSuggest(startWeek = state.week) {
+  let week = new Date(startWeek);
+  let plan = [];
+  const { body } = openSheet('Suggest meals', '');
+
+  const build = () => {
+    const wk = ymd(week);
+    const slots = slotsFor(wk);
+    const today = ymd(new Date());
+    const stats = recipeStats();
+    // don't suggest anything already planned this week or last week
+    const recent = new Set();
+    for (const w of [-1, 0]) for (const es of Object.values(slotsFor(ymd(addDays(week, 7 * w))))) for (const e of es) if (e.type === 'recipe') recent.add(e.recipeId);
+    const score = r => {
+      const s = stats.get(r.id);
+      const days = s ? daysSince(s.last) : 60; // never-had counts as ~2 months
+      return days * (0.85 + Math.random() * 0.3); // a little shuffle so Suggest can vary
+    };
+    const used = new Set();
+    plan = [];
+    DAYS.forEach((d, i) => MEALS.forEach(m => {
+      if (!state.settings.days[d.key][m]) return;
+      const slot = `${d.key}_${m}`;
+      const date = ymd(addDays(week, i));
+      if (date < today || (slots[slot] || []).length) return;
+      const options = [...state.recipes.values()]
+        .filter(r => !recent.has(r.id) && recipeMeals(r, stats).includes(m))
+        .map(r => ({ r, sc: score(r) }))
+        .sort((a, b) => b.sc - a.sc)
+        .map(x => x.r);
+      const pick = options.find(r => !used.has(r.id));
+      if (pick) used.add(pick.id);
+      plan.push({ slot, day: d, meal: m, date, options, pick, keep: !!pick });
+    }));
+  };
+
+  const draw = () => {
+    const stats = recipeStats();
+    const kept = plan.filter(p => p.keep && p.pick).length;
+    let html = `<div class="week-nav"><button class="icon-btn" data-dir="-1" aria-label="Previous week">‹</button>
+      <div class="label">${weekName(week)}<small>${fmtDay(week)} – ${fmtDay(addDays(week, 6))}</small></div>
+      <button class="icon-btn" data-dir="1" aria-label="Next week">›</button></div>`;
+    if (!state.recipes.size) {
+      body.innerHTML = html + '<p class="empty">Add some recipes first, then Suggest can plan with them.</p>';
+      return;
+    }
+    if (!plan.length) {
+      body.innerHTML = html + '<p class="empty"><span class="big">✅</span>Every meal left this week is already planned.<br>Try next week with ›.</p>';
+      return;
+    }
+    html += '<p class="small muted" style="margin:0 0 6px">Recipes you haven’t had for longest, for the empty meals. ↻ swaps one; untick to leave it empty.</p><ul class="pick-list">';
+    plan.forEach((p, i) => {
+      const s = p.pick && stats.get(p.pick.id);
+      html += `<li class="sug ${p.keep ? '' : 'off'}"><div class="grow">
+          <div class="small muted">${p.day.label.slice(0, 3)} ${fmtDay(fromYmd(p.date))} · ${MEAL_LABEL[p.meal]}</div>
+          ${p.pick ? `<b>${esc(p.pick.title)}</b><div class="small muted">${s ? `Last had ${ago(s.last)}` : 'Never had'}</div>`
+            : `<span class="small muted">${p.options.length
+              ? `All your ${MEAL_LABEL[p.meal].toLowerCase()} recipes were used this week or last week.`
+              : `No ${MEAL_LABEL[p.meal].toLowerCase()} recipes to suggest. Tag recipes “Good for ${MEAL_LABEL[p.meal].toLowerCase()}” when editing them.`}</span>`}
+        </div>
+        ${p.pick ? `<button class="icon-btn" data-swap="${i}" aria-label="Swap suggestion" ${p.options.length > 1 ? '' : 'disabled'}>↻</button>
+        <input type="checkbox" class="check" data-keep="${i}" ${p.keep ? 'checked' : ''} aria-label="Use this suggestion">` : ''}</li>`;
+    });
+    html += `</ul><div class="sticky-action stack">
+      <button class="btn primary block" data-act="apply" ${kept ? '' : 'disabled'}>Add ${kept} meal${kept === 1 ? '' : 's'} to the plan</button>
+      <button class="btn block" data-act="shuffle">🔀 Shuffle all</button></div>`;
+    body.innerHTML = html;
+  };
+
+  build();
+  draw();
+  body.onchange = e => {
+    const k = e.target.closest('[data-keep]');
+    if (k) { plan[Number(k.dataset.keep)].keep = k.checked; draw(); }
+  };
+  body.onclick = async e => {
+    const dir = e.target.closest('[data-dir]');
+    if (dir) { week = addDays(week, 7 * Number(dir.dataset.dir)); build(); draw(); return; }
+    const sw = e.target.closest('[data-swap]');
+    if (sw) {
+      const p = plan[Number(sw.dataset.swap)];
+      const taken = new Set(plan.filter(q => q !== p && q.keep && q.pick).map(q => q.pick.id));
+      const start = p.options.indexOf(p.pick);
+      const before = p.pick;
+      for (let n = 1; n < p.options.length; n++) {
+        const cand = p.options[(start + n) % p.options.length];
+        if (!taken.has(cand.id)) { p.pick = cand; break; }
+      }
+      if (p.pick === before) toast('No other recipe is free – untick another meal to swap');
+      p.keep = true;
+      draw();
+      return;
+    }
+    const act = e.target.closest('[data-act]')?.dataset.act;
+    if (act === 'shuffle') { build(); draw(); }
+    if (act === 'apply') {
+      const wk = ymd(week);
+      const slots = slotsFor(wk);
+      const add = {};
+      for (const p of plan) if (p.keep && p.pick) add[p.slot] = [...(slots[p.slot] || []), { id: newId(), type: 'recipe', recipeId: p.pick.id }];
+      await state.store.merge('plans', wk, { slots: add });
+      closeSheet();
+      state.week = new Date(week);
+      state.tab = 'plan';
+      render();
+      toast(`Added ${Object.keys(add).length} meals to the plan`);
+    }
+  };
 }
 
 /* ----- Settings ----- */
@@ -391,8 +645,10 @@ function openRecipe(id) {
     const ings = rec.ingredients || [];
     const onList = new Set(state.shopping.filter(i => !i.checked).map(i => i.key));
     const scroll = sheet.scrollTop;
+    const st = recipeStats().get(id);
     body.innerHTML = `
       ${rec.photo ? `<img class="hero" src="${rec.photo}" alt="">` : ''}
+      <p class="small" style="margin:0 0 8px"><b>${st ? `Last had ${ago(st.last)}` : 'Not had yet'}</b>${st ? ` · ${st.count} time${st.count === 1 ? '' : 's'} in total` : ''}</p>
       ${rec.serves || rec.source ? `<p class="small muted" style="margin:0 0 8px">${rec.serves ? `Serves ${esc(rec.serves)}` : ''}${rec.serves && rec.source ? ' · ' : ''}${esc(rec.source || '')}</p>` : ''}
       <div class="row"><h3 class="grow" style="margin:6px 0">Ingredients</h3>
         ${ings.length ? `<button class="link-btn" data-act="all">${ticked.size === ings.length ? 'Untick all' : 'Tick all'}</button>` : ''}</div>
@@ -481,6 +737,9 @@ function openEditor(id, { onSaved } = {}) {
       <div id="photo-wrap"></div>
       <label class="field"><span>Recipe name</span><input type="text" id="ed-title" value="${esc(r?.title)}" placeholder="e.g. Chicken fajitas"></label>
       <label class="field"><span>Serves</span><input type="text" id="ed-serves" inputmode="numeric" value="${esc(r?.serves)}" placeholder="e.g. 4"></label>
+      <div class="field"><span class="field-label">Good for (used by Suggest)</span><div class="row" id="ed-meals" style="gap:18px">
+        ${MEALS.map(m => `<label class="row"><input type="checkbox" class="check" value="${m}" ${(r ? recipeMeals(r, recipeStats()) : ['dinner']).includes(m) ? 'checked' : ''}> ${MEAL_LABEL[m]}</label>`).join('')}
+      </div></div>
       <label class="field"><span>Ingredients – one per line</span><textarea id="ed-ings" rows="9" placeholder="400g chicken breast&#10;2 red peppers&#10;1 onion">${esc((r?.ingredients || []).join('\n'))}</textarea></label>
       <label class="field"><span>Method</span><textarea id="ed-method" rows="9" placeholder="Leave a blank line between steps">${esc(r?.method)}</textarea></label>
       <label class="field"><span>Source / notes</span><input type="text" id="ed-source" value="${esc(r?.source)}" placeholder="e.g. Family favourite, cookbook p.42"></label>
@@ -538,6 +797,7 @@ function openEditor(id, { onSaved } = {}) {
       await state.store.set('recipes', rid, {
         title,
         serves: field('#ed-serves').value.trim(),
+        meals: (() => { const m = [...body.querySelectorAll('#ed-meals input:checked')].map(i => i.value); return m.length ? m : ['dinner']; })(),
         ingredients: field('#ed-ings').value.split('\n').map(cleanLine).filter(Boolean),
         method: field('#ed-method').value.trim(),
         source: field('#ed-source').value.trim(),
@@ -716,6 +976,10 @@ document.addEventListener('click', async e => {
     }
     case 'open-recipe': openRecipe(el.dataset.recipe); break;
     case 'new-recipe': openEditor(null); break;
+    case 'suggest': openSuggest(state.week); break;
+    case 'plan-recipe': openPlanPicker(el.dataset.recipe); break;
+    case 'history-period': state.historyMonths = Number(el.dataset.months); render(); break;
+    case 'toggle-stale': state.showAllStale = !state.showAllStale; render(); break;
     case 'toggle-item': await state.store.merge('shopping', el.dataset.id, { checked: el.checked }); break;
     case 'edit-item': openItem(el.dataset.id); break;
     case 'clear-done': {
