@@ -1,6 +1,6 @@
 // Offline support: keeps the app's own files cached so it opens without a connection.
 // Bump VERSION whenever you change any app file so phones pick up the update.
-const VERSION = 'meal-planner-v3';
+const VERSION = 'meal-planner-v4';
 const SHELL = [
   './',
   'index.html',
@@ -11,6 +11,7 @@ const SHELL = [
   'js/store.js',
   'js/ingredients.js',
   'js/scan.js',
+  'js/crop.js',
   'icons/icon-192.png',
   'icons/icon-512.png',
   'icons/apple-touch-icon.png',
@@ -34,9 +35,11 @@ self.addEventListener('fetch', e => {
   const url = new URL(req.url);
 
   // App files: network first (so updates arrive), fall back to cache when offline.
+  // 'no-cache' makes the browser re-check each file with the server, so an update never
+  // mixes new and old files (GitHub Pages otherwise lets browsers reuse files for 10 min).
   if (url.origin === location.origin) {
     e.respondWith(
-      fetch(req)
+      fetch(req, { cache: 'no-cache' })
         .then(res => {
           if (res.ok) { const copy = res.clone(); caches.open(VERSION).then(c => c.put(req, copy)); }
           return res;

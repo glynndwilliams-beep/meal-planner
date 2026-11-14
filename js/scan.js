@@ -42,26 +42,67 @@ async function fileToImage(file) {
   } finally { setTimeout(() => URL.revokeObjectURL(url), 1000); }
 }
 
-/** Downscale + greyscale + boost contrast so text recognition is faster and more accurate. */
-function prepareForOcr(img) {
-  const max = 2000;
-  const w0 = img.width, h0 = img.height;
-  const scale = Math.min(1, max / Math.max(w0, h0));
-  const w = Math.round(w0 * scale), h = Math.round(h0 * scale);
+/**
+ * Prepare a phone photo for text recognition:
+ *  - crop to the area the user marked (fractions 0–1)
+ *  - keep plenty of resolution (small cookbook print needs it)
+ *  - greyscale, then *adaptive* black/white: each pixel is compared with its own
+ *    neighbourhood, so shadows, glare and uneven light don't wipe out letters.
+ */
+export function prepareForOcr(img, crop = { x: 0, y: 0, w: 1, h: 1 }) {
+  const sx = Math.round(crop.x * img.width), sy = Math.round(crop.y * img.height);
+  const sw = Math.max(1, Math.round(crop.w * img.width)), sh = Math.max(1, Math.round(crop.h * img.height));
+  const long = Math.max(sw, sh);
+  const scale = Math.min(2, Math.max(1800 / long, Math.min(1, 3200 / long)));
+  const w = Math.round(sw * scale), h = Math.round(sh * scale);
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
   const ctx = c.getContext('2d', { willReadFrequently: true });
-  ctx.drawImage(img, 0, 0, w, h);
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, w, h);
   const d = ctx.getImageData(0, 0, w, h);
   const p = d.data;
-  for (let i = 0; i < p.length; i += 4) {
-    let g = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2];
-    g = (g - 128) * 1.35 + 128 + 10; // contrast + slight brighten
-    g = g < 0 ? 0 : g > 255 ? 255 : g;
-    p[i] = p[i + 1] = p[i + 2] = g;
+  const n = w * h;
+  const grey = new Float32Array(n);
+  for (let i = 0, j = 0; j < n; i += 4, j++) grey[j] = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2];
+
+  // Bradley–Roth adaptive threshold using an integral image.
+  const integral = new Float64Array((w + 1) * (h + 1));
+  for (let y = 0; y < h; y++) {
+    let row = 0;
+    for (let x = 0; x < w; x++) {
+      row += grey[y * w + x];
+      integral[(y + 1) * (w + 1) + x + 1] = integral[y * (w + 1) + x + 1] + row;
+    }
+  }
+  const half = Math.max(8, Math.round(Math.max(w, h) / 32));
+  const T = 0.14;
+  for (let y = 0; y < h; y++) {
+    const y1 = Math.max(0, y - half), y2 = Math.min(h - 1, y + half);
+    for (let x = 0; x < w; x++) {
+      const x1 = Math.max(0, x - half), x2 = Math.min(w - 1, x + half);
+      const count = (x2 - x1 + 1) * (y2 - y1 + 1);
+      const sum = integral[(y2 + 1) * (w + 1) + x2 + 1] - integral[y1 * (w + 1) + x2 + 1]
+        - integral[(y2 + 1) * (w + 1) + x1] + integral[y1 * (w + 1) + x1];
+      const v = grey[y * w + x] * count <= sum * (1 - T) ? 0 : 255;
+      const k = (y * w + x) * 4;
+      p[k] = p[k + 1] = p[k + 2] = v;
+    }
   }
   ctx.putImageData(d, 0, 0);
   return c;
+}
+
+/** Drop lines the reader wasn't sure about that also look like noise (pictures, page edges). */
+function keepLine(line) {
+  const t = (line.text || '').trim();
+  if (!t) return false;
+  const letters = (t.match(/[A-Za-z0-9½¼¾]/g) || []).length;
+  const ratio = letters / t.replace(/\s/g, '').length;
+  const realWords = (t.match(/[A-Za-z]{3,}/g) || []).length;
+  if (line.confidence >= 70 && ratio > 0.5) return true;
+  if (line.confidence >= 45 && ratio > 0.7 && (realWords >= 1 || /\d/.test(t))) return true;
+  return false;
 }
 
 /** Small JPEG to keep with the recipe (stays well under database document limits). */
@@ -74,16 +115,31 @@ export async function makeThumbnail(file, size = 480) {
   return c.toDataURL('image/jpeg', 0.6);
 }
 
-export async function scanImage(file, onProgress = () => {}) {
+export async function scanImage(file, onProgress = () => {}, { crop } = {}) {
   progressCb = onProgress;
   onProgress(0, 'Preparing photo…');
   const img = await fileToImage(file);
-  const canvas = prepareForOcr(img);
+  const canvas = prepareForOcr(img, crop);
   const worker = await getWorker();
+  await worker.setParameters({ preserve_interword_spaces: '1', user_defined_dpi: '300' });
   const { data } = await worker.recognize(canvas);
   onProgress(1, 'Done');
+  if (Array.isArray(data.lines) && data.lines.length) {
+    return data.lines.filter(keepLine).map(l => l.text.trim()).join('\n');
+  }
   return data.text || '';
 }
+
+/** Plain text -> ingredient lines (for a crop the user marked as ingredients). */
+export function textToIngredients(text) {
+  return joinWrappedIngredients(text.split(/\r?\n/).map(cleanLine).filter(l => l.length > 1 && !ING_HEAD.test(l)));
+}
+/** Plain text -> method paragraphs (for a crop the user marked as method). */
+export function textToMethod(text) {
+  return joinMethod(text.split(/\r?\n/).filter(l => !METHOD_HEAD.test(l.trim())));
+}
+
+export { fileToImage };
 
 /* ---------------- turn raw text into recipe parts ---------------- */
 const ING_HEAD = /^(ingredients?|you will need|what you need|shopping list)\b[:\s]*$/i;
@@ -131,11 +187,19 @@ export function parseRecipeText(text) {
   return { title, serves, ingredients, method };
 }
 
+// Fix digits misread as letters at the start of a quantity: "4o0g" -> "400g", "1l/2" -> "11/2"
+function fixQuantity(line) {
+  return line.replace(/^[\dOoIl|S]+/, m => (/\d/.test(m) ? m.replace(/[Oo]/g, '0').replace(/[Il|]/g, '1').replace(/S/g, '5') : m));
+}
+
 // A line that doesn't start with a quantity and follows an ingredient is usually a wrapped continuation.
 function joinWrappedIngredients(list) {
+  list = list.map(fixQuantity);
   const out = [];
   for (const l of list) {
-    if (out.length && /^[a-z(]/.test(l) && !QTY_START.test(l) && out[out.length - 1].length > 25) out[out.length - 1] += ' ' + l;
+    const prev = out[out.length - 1];
+    const unfinished = prev && (/[,(\-–]$/.test(prev) || prev.split('(').length > prev.split(')').length ||/\b(and|or|of|into|for|to|plus|a|the|with)$/i.test(prev));
+    if (prev && !QTY_START.test(l) && (unfinished || /^\(/.test(l))) out[out.length - 1] += ' ' + l;
     else out.push(l);
   }
   return out;

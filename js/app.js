@@ -6,7 +6,8 @@ import {
 import {
   parseIngredient, ingredientKey, displayName, guessSection, formatAmounts, addAmount, cleanLine, SECTIONS,
 } from './ingredients.js';
-import { scanImage, parseRecipeText, makeThumbnail } from './scan.js';
+import { scanImage, parseRecipeText, makeThumbnail, textToIngredients, textToMethod } from './scan.js';
+import { mountCropper } from './crop.js';
 
 const APP_VERSION = '1.1.0';
 
@@ -727,11 +728,14 @@ function openEditor(id, { onSaved } = {}) {
   const { body } = openSheet(r ? 'Edit recipe' : 'New recipe', `
     <div class="stack">
       <div class="card" style="margin:0"><div class="card-body stack">
-        <div class="small muted">Scan a recipe page with your camera. You can scan several pages – each one is added below for you to check.</div>
+        <div class="small muted">Photograph the recipe in good light with the phone flat above the page, then box in just the text. You can scan several parts – each is added below for you to check.</div>
         <div class="scan-buttons">
           <label class="btn primary file-btn">📷 Take photo<input type="file" accept="image/*" capture="environment" data-scan></label>
           <label class="btn file-btn">🖼️ From photos<input type="file" accept="image/*" data-scan></label>
         </div>
+        <details class="small tip"><summary>Tip: the iPhone’s own <b>Scan Text</b> is even more accurate</summary>
+          Tap in the <b>Ingredients</b> or <b>Method</b> box below, then tap it again (or touch and hold) and choose <b>Scan Text</b> – you may need to tap <b>›</b> to find it. Point the camera at the page, wait for the text to highlight, then tap <b>Insert</b>.</details>
+        <div id="crop-panel" class="stack" hidden></div>
         <div id="scan-status" class="stack" hidden><div class="small" id="scan-msg"></div><div class="progress"><div id="scan-bar"></div></div></div>
       </div></div>
       <div id="photo-wrap"></div>
@@ -758,33 +762,84 @@ function openEditor(id, { onSaved } = {}) {
   const field = s => $(s, body);
   const append = (sel, text, sep) => { const el = field(sel); el.value = el.value.trim() ? `${el.value.trim()}${sep}${text}` : text; };
 
-  body.addEventListener('change', async e => {
+  // Step 1: photo chosen -> show it with a crop box and "this part is…" choice
+  const panel = $('#crop-panel', body);
+  let pending = null;
+  const closeCrop = () => {
+    if (pending) URL.revokeObjectURL(pending.url);
+    pending = null;
+    panel.hidden = true;
+    panel.innerHTML = '';
+  };
+  body.addEventListener('change', e => {
     const input = e.target.closest('[data-scan]');
     if (!input || !input.files[0]) return;
     const file = input.files[0];
     input.value = '';
+    closeCrop();
+    const url = URL.createObjectURL(file);
+    status.hidden = true;
+    panel.hidden = false;
+    panel.innerHTML = `<div class="small"><b>Drag the corners</b> so the box covers just the recipe text. Leave out pictures and other recipes.</div>
+      <div id="crop-host"></div>
+      <div class="small muted">This part is:</div>
+      <div class="segmented" style="grid-template-columns:repeat(3,1fr);margin:0">
+        ${[['auto', 'Whole recipe'], ['ingredients', 'Ingredients'], ['method', 'Method']].map(([v, l], i) => `<button type="button" data-target="${v}" class="${i ? '' : 'on'}" aria-pressed="${!i}">${l}</button>`).join('')}
+      </div>
+      <div class="row"><button class="btn primary grow" data-act="read">Read text</button><button class="btn" data-act="cancel-crop">Cancel</button></div>`;
+    pending = { file, url, target: 'auto', cropper: mountCropper($('#crop-host', body), url) };
+    panel.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  });
+
+  // Step 2: read the boxed area
+  const readText = async () => {
+    const { file, target } = pending;
+    const crop = pending.cropper.get();
+    closeCrop();
     body.querySelectorAll('[data-scan]').forEach(i => { i.disabled = true; });
     status.hidden = false;
     bar.style.width = '0%';
     msg.textContent = 'Preparing photo…';
     try {
       if (!photo) { photo = await makeThumbnail(file); drawPhoto(); }
-      const text = await scanImage(file, (p, m) => { bar.style.width = `${Math.round(p * 100)}%`; msg.textContent = m; });
-      const parsed = parseRecipeText(text);
-      if (parsed.title && !field('#ed-title').value.trim()) field('#ed-title').value = parsed.title;
-      if (parsed.serves && !field('#ed-serves').value.trim()) field('#ed-serves').value = parsed.serves;
-      if (parsed.ingredients.length) append('#ed-ings', parsed.ingredients.join('\n'), '\n');
-      if (parsed.method) append('#ed-method', parsed.method, '\n\n');
-      if (!parsed.ingredients.length && !parsed.method && text.trim()) append('#ed-method', text.trim(), '\n\n');
-      msg.textContent = text.trim()
-        ? `Found ${parsed.ingredients.length} ingredient${parsed.ingredients.length === 1 ? '' : 's'}${parsed.method ? ' and a method' : ''}. Please check them below and fix any mistakes.`
-        : 'No text found. Try again in good light, holding the phone flat above the page.';
+      const text = await scanImage(file, (p, m) => { bar.style.width = `${Math.round(p * 100)}%`; msg.textContent = m; }, { crop });
+      if (!text.trim()) {
+        msg.textContent = 'No text found. Try again in good light, with the phone flat above the page and the box tight around the text.';
+        return;
+      }
+      if (target === 'ingredients') {
+        const ings = textToIngredients(text);
+        if (ings.length) append('#ed-ings', ings.join('\n'), '\n');
+        msg.textContent = `Added ${ings.length} ingredient${ings.length === 1 ? '' : 's'}. Please check them below and fix any mistakes.`;
+      } else if (target === 'method') {
+        const m = textToMethod(text);
+        if (m) append('#ed-method', m, '\n\n');
+        msg.textContent = 'Added the method. Please check it below and fix any mistakes.';
+      } else {
+        const parsed = parseRecipeText(text);
+        if (parsed.title && !field('#ed-title').value.trim()) field('#ed-title').value = parsed.title;
+        if (parsed.serves && !field('#ed-serves').value.trim()) field('#ed-serves').value = parsed.serves;
+        if (parsed.ingredients.length) append('#ed-ings', parsed.ingredients.join('\n'), '\n');
+        if (parsed.method) append('#ed-method', parsed.method, '\n\n');
+        if (!parsed.ingredients.length && !parsed.method) append('#ed-method', text.trim(), '\n\n');
+        msg.textContent = `Found ${parsed.ingredients.length} ingredient${parsed.ingredients.length === 1 ? '' : 's'}${parsed.method ? ' and a method' : ''}. Please check them below and fix any mistakes.`;
+      }
     } catch (err) {
       console.error(err);
       msg.textContent = `Couldn’t read that photo: ${err.message || err}`;
     } finally {
       body.querySelectorAll('[data-scan]').forEach(i => { i.disabled = false; });
     }
+  };
+  body.addEventListener('click', e => {
+    const t = e.target.closest('[data-target]');
+    if (t && pending) {
+      pending.target = t.dataset.target;
+      panel.querySelectorAll('[data-target]').forEach(b => { b.classList.toggle('on', b === t); b.setAttribute('aria-pressed', b === t); });
+    }
+    const act = e.target.closest('[data-act]')?.dataset.act;
+    if (act === 'read' && pending) readText();
+    if (act === 'cancel-crop') closeCrop();
   });
 
   body.addEventListener('click', async e => {
