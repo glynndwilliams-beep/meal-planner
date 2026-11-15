@@ -12,7 +12,7 @@ import { mountCropper } from './crop.js';
 import { importRecipe, findUrl, testRelay, PAGE_SCRIPT, readImportParam } from './web.js';
 import { setupTrips, myTrips, currentTripCode } from './trip.js';
 
-const APP_VERSION = '1.6.3';
+const APP_VERSION = '1.6.4';
 
 const DAYS = [
   { key: 'mon', label: 'Monday' },
@@ -74,14 +74,20 @@ let pendingNote = '';    // what the Shortcut sent, shown if its import fails
   if (['import', 'url', 'text', 'title'].some(k => q.has(k))) {
     const raw = (q.get('import') || '').trim();
     const page = readImportParam(raw);
-    if (page) { pendingPage = page; pendingImport = findUrl(page.u); }
-    if (!pendingImport) pendingImport = findUrl([raw, q.get('url'), q.get('text'), q.get('title')].filter(Boolean).join(' '));
-    // Sent more than a plain link but it wasn't usable recipe data: keep a sample to show if the import fails
-    if (pendingImport && !pendingPage && raw.length > pendingImport.length + 10) pendingNote = raw.slice(0, 90);
-    if (!pendingImport) {
-      pendingProblem = raw
-        ? `The Shortcut sent something the app couldn’t use: “${raw.slice(0, 80)}${raw.length > 80 ? '…' : ''}”.`
-        : 'The Shortcut opened the app but sent nothing after “import=”.';
+    if (page && page.cut) {
+      pendingProblem = /^MPR1/i.test(raw)
+        ? 'The recipe was cut short on its way from the Shortcut (an older version of the script). Copy the script again from Settings → Recipes from websites and paste it over the code in “Run JavaScript on Web Page”.'
+        : `The recipe was cut short on its way from the Shortcut – only ${raw.length} characters arrived. Tell whoever set up the app what happened.`;
+    } else {
+      if (page) { pendingPage = page; pendingImport = findUrl(page.u); }
+      if (!pendingImport) pendingImport = findUrl([raw, q.get('url'), q.get('text'), q.get('title')].filter(Boolean).join(' '));
+      // Sent more than a plain link but it wasn't usable recipe data: keep a sample to show if the import fails
+      if (pendingImport && !pendingPage && raw.length > pendingImport.length + 10) pendingNote = raw.slice(0, 90);
+      if (!pendingImport) {
+        pendingProblem = raw
+          ? `The Shortcut sent something the app couldn’t use: “${raw.slice(0, 80)}${raw.length > 80 ? '…' : ''}”.`
+          : 'The Shortcut opened the app but sent nothing after “import=”.';
+      }
     }
     history.replaceState(null, '', location.pathname); // so a reload doesn't import it again
   }

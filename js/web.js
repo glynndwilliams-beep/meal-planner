@@ -235,8 +235,10 @@ export function parsePageData(page) {
 /**
  * What the iPhone Shortcut's "Run JavaScript on Web Page" action runs (pasted in by the user).
  * It keeps only what the app uses (no reviews, nutrition, videos…) and packs it as
- * MPR1.<base64url>, which is compact and made only of characters that Shortcuts' URL Encode
- * leaves alone – so the link can't double in size or be cut short.
+ * MPR2<base64url>zz: compact, and made only of letters, digits, - and _, which Shortcuts'
+ * URL Encode leaves alone (so it can't double in size). No full stop: the Shortcut's
+ * Open URLs step treats "." as the end of a sentence and cuts the link there. The closing
+ * "zz" lets the app tell if the end was cut off.
  */
 export const PAGE_SCRIPT = `function isR(o){var t=o&&o['@type'];return t=='Recipe'||(Array.isArray(t)&&t.indexOf('Recipe')>=0);}
 function find(o,d){if(!o||typeof o!='object'||d>6)return null;if(Array.isArray(o)){for(var i=0;i<o.length;i++){var a=find(o[i],d+1);if(a)return a;}return null;}if(isR(o))return o;var ks=['@graph','mainEntity','mainEntityOfPage','itemListElement','item'];for(var j=0;j<ks.length;j++){var b=find(o[ks[j]],d+1);if(b)return b;}return null;}
@@ -248,19 +250,29 @@ var r=null;if(rec){r={'@type':'Recipe',name:rec.name||rec.headline,recipeYield:r
 else{var sc=document.querySelector('[itemtype*="schema.org/Recipe"]');if(sc){var g=function(p){return Array.prototype.map.call(sc.querySelectorAll('[itemprop="'+p+'"]'),function(e){return(e.getAttribute('content')||e.getAttribute('src')||e.textContent||'').trim();});};r={'@type':'Recipe',name:g('name')[0],recipeYield:g('recipeYield')[0],recipeIngredient:g('recipeIngredient').length?g('recipeIngredient'):g('ingredients'),recipeInstructions:g('recipeInstructions'),image:g('image')[0]};}}
 var sn=document.querySelector('meta[property="og:site_name"]');
 var j=JSON.stringify({u:location.href,s:sn?sn.content:'',r:r});
-completion('MPR1.'+btoa(unescape(encodeURIComponent(j))).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,''));`;
+completion('MPR2'+btoa(unescape(encodeURIComponent(j))).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'')+'zz');`;
 
-/** Turn whatever arrived after ?import= back into page data, or null. Copes with every version of the script. */
+function unpack(b64url) {
+  const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
+  const bytes = Uint8Array.from(atob(b64 + '==='.slice((b64.length + 3) % 4)), c => c.charCodeAt(0));
+  const p = JSON.parse(new TextDecoder().decode(bytes));
+  return p && typeof p.u === 'string' ? p : null;
+}
+
+/**
+ * Turn whatever arrived after ?import= back into page data. Returns the data, null if it isn't
+ * page data, or { cut: true } if it is but arrived cut short. Copes with every version of the script.
+ */
 export function readImportParam(raw) {
   let t = String(raw || '').trim();
-  const pack = t.match(/^MPR1(?:\.|%2E)([A-Za-z0-9_-]+)/i);
-  if (pack) {
-    try {
-      const b64 = pack[1].replace(/-/g, '+').replace(/_/g, '/');
-      const bytes = Uint8Array.from(atob(b64 + '==='.slice((b64.length + 3) % 4)), c => c.charCodeAt(0));
-      const p = JSON.parse(new TextDecoder().decode(bytes));
-      return p && typeof p.u === 'string' ? p : null;
-    } catch { return null; }
+  const v2 = t.match(/^MPR2([A-Za-z0-9_-]*)/);
+  if (v2) {
+    if (!v2[1].endsWith('zz')) return { cut: true };
+    try { return unpack(v2[1].slice(0, -2)) || { cut: true }; } catch { return { cut: true }; }
+  }
+  const v1 = t.match(/^MPR1(?:\.|%2E)?([A-Za-z0-9_-]*)/i);
+  if (v1) {
+    try { return unpack(v1[1]) || { cut: true }; } catch { return { cut: true }; }
   }
   for (let i = 0; i < 3; i++) {
     t = t.replace(/^MPRECIPE(:|%3A)\s*/i, '');
