@@ -6,7 +6,7 @@ Three steps, about 20 minutes in total, all free. Do them on a computer.
 
 ## Step 1 – Put the app online (GitHub Pages)
 
-The iPhone needs the app on a secure (https) web address before it can use the camera and be added to the Home Screen.
+Phones need the app on a secure (https) web address before it can use the camera and be added to the home screen.
 
 1. Create a free account at <https://github.com> (skip this if you already have one).
 2. Click **+** (top right) → **New repository**.
@@ -52,14 +52,24 @@ At this point the app works on one phone. Do step 2 to share it with your househ
 
 ---
 
-## Step 3 – Install on each iPhone
+## Step 3 – Install on each phone (iPhone or Android)
 
+iPhones and Android phones can share the same household and trips.
+
+**iPhone**
 1. Open **Safari** (it must be Safari) and go to your GitHub Pages address.
 2. Tap the **Share** button (square with an up arrow) → scroll down → **Add to Home Screen** → **Add**.
-3. Open **Meals** from the Home Screen.
+
+**Android**
+1. Open **Chrome** and go to your GitHub Pages address.
+2. Tap **Install** if Chrome offers it, or tap the **⋮** menu (top right) → **Add to Home screen** (or **Install app**) → **Install**.
+   (Inside the app, **Settings → Install** also has an install button when Chrome allows it.)
+
+**Then, on either:**
+1. Open **Meals** from the home screen.
    - **First phone:** tap **Create a household**. You'll see a code like `PLUM-RIVER-4821` in Settings. Anything you'd already saved on that phone is copied in.
-   - **Other phones:** tap **Join household** and type the code (or send it from Settings → *Send code to someone*).
-4. The first time you scan, allow camera access when asked.
+   - **Other phones:** tap **Join household or trip** and type the code (or send it from Settings → *Send code to someone*).
+2. The first time you scan, allow camera access when asked.
 
 ---
 
@@ -91,7 +101,7 @@ Until you do this, **Plan a trip** will say it couldn't create the trip.
 | Change which days/meals appear | **Settings** → tick or untick in *Meals to plan* |
 | See other weeks | **‹ ›** arrows at the top of the Plan |
 | Scan a recipe | **Recipes** → **+ New** → **📷 Take photo**. Scan extra pages the same way; each is added below. Check the text, fix any mistakes, then **Save**. |
-| Add a recipe from a website | In Safari on the recipe page tap **Share → Copy**. Then **Recipes** → **+ New** → paste into the box at the top → **Get recipe**. Check it, then **Save**. Works with BBC Food, BBC Good Food and most recipe sites. |
+| Add a recipe from a website | On the recipe page tap **Share → Copy** (Safari) or **⋮ → Share → Copy** (Chrome on Android), or copy the address bar. Then **Recipes** → **+ New** → paste into the box at the top → **Get recipe**. Check it, then **Save**. Works with BBC Food, BBC Good Food and most recipe sites. |
 | Cook from a recipe | Open it → **👩‍🍳 Start cooking**. Big steps, one at a time; the screen stays on. Tap a step to tick it off. At the end, rate it and add a note. |
 | Cook for more or fewer people | **Settings → Cooking for** sets your usual number. On a recipe, **− / +** next to *Serves* changes it for that recipe; amounts and the shopping list follow. |
 | Rate a recipe or add a note | Tap the stars on a recipe, or **✏️ Add a note**. **★ Favourites** on the Recipes tab shows 4–5 star recipes, and Suggest picks favourites more often. |
@@ -107,6 +117,8 @@ Until you do this, **Plan a trip** will say it couldn't create the trip.
 | Get meal ideas | **✨ Suggest** (Plan or History tab) fills empty meals with recipes you haven't had for longest. ↻ swaps one, untick to skip, **Shuffle all** for a fresh set. |
 | Control which meal a recipe is suggested for | Edit the recipe → **Good for** breakfast / lunch / dinner |
 | Keep a copy of everything | **Settings → Save a backup file** |
+
+**Android tip:** **Google Lens** (in the Google app or the camera) can copy text from a cookbook page – tap **Text**, select, **Copy**, then paste into the Ingredients or Method box.
 
 **Scanning tips:** good light, phone flat above the page, the whole recipe in frame. Do the ingredients page and the method page as separate photos if they're far apart. The text reader runs on the phone (photos aren't uploaded); the first scan downloads it, which takes a few seconds.
 

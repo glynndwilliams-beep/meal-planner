@@ -209,6 +209,8 @@ export function setupTrips(ctx) {
         <button class="btn block" data-action="trip-edit">Change name, dates or meals</button>
         <button class="btn danger block" data-action="trip-delete">Delete this trip for everyone</button></div></div>`;
     }
+    const install = !state.store && ctx.installHintHtml ? ctx.installHintHtml() : '';
+    if (install) html += `<div class="section-title">Put it on your home screen</div><div class="card"><div class="card-body small stack">${install}</div></div>`;
     html += `<div class="card"><div class="card-body stack">
       ${state.store ? '<button class="btn block" data-action="trip-home">‹ Back to our home meal plan</button>' : '<button class="btn block" data-action="trip-forget">Remove this trip from this phone</button>'}
     </div></div>`;
@@ -657,7 +659,7 @@ export function setupTrips(ctx) {
       case 'trip-family': openFamilyPicker(); break;
       case 'trip-edit': openEdit(); break;
       case 'trip-delete': await removeTrip(); break;
-      case 'trip-share-code': shareText(`${t.info.name} – trip code`, `Join our “${t.info.name}” trip plan and shopping list (${fmtRange(t.info)}).\n\n1. Open ${location.origin}${location.pathname} on your phone (in Safari on iPhone).\n2. Tap “Join household or trip” and enter: ${t.code}\n\nIt only works until the end of the trip.`); break;
+      case 'trip-share-code': shareText(`${t.info.name} – trip code`, `Join our “${t.info.name}” trip plan and shopping list (${fmtRange(t.info)}).\n\n1. Open ${location.origin}${location.pathname} on your phone – in Safari on an iPhone, or Chrome on Android.\n2. Tap “Join household or trip” and enter: ${t.code}\n3. Optional: add it to your home screen – iPhone: Share → Add to Home Screen. Android: ⋮ menu → Add to Home screen (or Install app).\n\nIt only works until the end of the trip.`); break;
       case 'trip-shop-meals': openMealsShop(); break;
       case 'trip-shop-filter': t.shopFilter = el.dataset.f; ctx.render(); break;
       case 'trip-toggle-item': await t.store.merge('shopping', el.dataset.id, { checked: el.checked }); break;

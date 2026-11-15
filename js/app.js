@@ -196,6 +196,24 @@ const qtyOf = item => item.qtyText || formatAmounts(item.amounts);
 const sortedRecipes = () => [...state.recipes.values()].sort((a, b) => (a.title || '').localeCompare(b.title || ''));
 const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const isStandalone = () => navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+const isAndroid = /android/i.test(navigator.userAgent);
+
+// Android Chrome offers its own "Install app" prompt; keep it for an Install button.
+let installPrompt = null;
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPrompt = e; scheduleRender(); });
+window.addEventListener('appinstalled', () => { installPrompt = null; toast('Meal Planner installed'); scheduleRender(); });
+
+/** How to put the app on this phone's home screen ('' once it's installed, or on a computer). */
+function installHintHtml() {
+  if (isStandalone()) return '';
+  if (installPrompt) {
+    return `<p style="margin:0">Install Meal Planner so it opens from your home screen like an app and works without signal.</p>
+      <button class="btn primary block" data-action="install-app">📲 Install Meal Planner</button>`;
+  }
+  if (isIOS) return 'To put Meal Planner on your Home Screen: in <b>Safari</b> tap the <b>Share</b> button (square with an arrow), scroll down and tap <b>Add to Home Screen</b>.';
+  if (isAndroid) return 'To put Meal Planner on your home screen: in <b>Chrome</b> tap the <b>⋮</b> menu (top right), then <b>Add to Home screen</b> or <b>Install app</b>.';
+  return '';
+}
 
 /* ---------------- data connection ---------------- */
 function mergeDays(days) {
@@ -642,10 +660,8 @@ function renderSettings() {
 
   html += trips.settingsHtml();
 
-  if (isIOS && !isStandalone()) {
-    html += `<div class="section-title">Install</div><div class="card"><div class="card-body small">
-      To put Meal Planner on your Home Screen: in Safari tap the <b>Share</b> button (square with an arrow), scroll down and tap <b>Add to Home Screen</b>.</div></div>`;
-  }
+  const install = installHintHtml();
+  if (install) html += `<div class="section-title">Install</div><div class="card"><div class="card-body small stack">${install}</div></div>`;
 
   html += `<div class="section-title">Backup</div><div class="card"><div class="card-body stack">
       <p class="small muted" style="margin:0">${state.recipes.size} recipes, ${state.plans.size} planned weeks, ${state.shopping.length} shopping items.</p>
@@ -1080,8 +1096,10 @@ function openEditor(id, { onSaved } = {}) {
           <label class="btn primary file-btn">📷 Take photo<input type="file" accept="image/*" capture="environment" data-scan></label>
           <label class="btn file-btn">🖼️ From photos<input type="file" accept="image/*" data-scan></label>
         </div>
-        <details class="small tip"><summary>Tip: the iPhone’s own <b>Scan Text</b> is even more accurate</summary>
-          Tap in the <b>Ingredients</b> or <b>Method</b> box below, then tap it again (or touch and hold) and choose <b>Scan Text</b> – you may need to tap <b>›</b> to find it. Point the camera at the page, wait for the text to highlight, then tap <b>Insert</b>.</details>
+        ${isIOS ? `<details class="small tip"><summary>Tip: the iPhone’s own <b>Scan Text</b> is even more accurate</summary>
+          Tap in the <b>Ingredients</b> or <b>Method</b> box below, then tap it again (or touch and hold) and choose <b>Scan Text</b> – you may need to tap <b>›</b> to find it. Point the camera at the page, wait for the text to highlight, then tap <b>Insert</b>.</details>`
+        : isAndroid ? `<details class="small tip"><summary>Tip: <b>Google Lens</b> can copy text from a page too</summary>
+          Open <b>Google Lens</b> (in the Google app, or the camera on many phones), point it at the page, tap <b>Text</b>, select the ingredients or method and tap <b>Copy</b>. Then touch and hold in the <b>Ingredients</b> or <b>Method</b> box below and choose <b>Paste</b>.</details>` : ''}
         <div id="crop-panel" class="stack" hidden></div>
         <div id="scan-status" class="stack" hidden><div class="small" id="scan-msg"></div><div class="progress"><div id="scan-bar"></div></div></div>
       </div></div>
@@ -1412,7 +1430,7 @@ async function welcomeAction(fn) {
 /* ---------------- trips ---------------- */
 const trips = setupTrips({
   state, $, esc, toast, setTop, openSheet, closeSheet, methodHtml, shareText, ymd, fromYmd, addDays, MEALS, MEAL_LABEL,
-  firebaseConfig, addToShopping, scheduleRender, setTabbar, renderWelcome,
+  firebaseConfig, addToShopping, scheduleRender, setTabbar, renderWelcome, installHintHtml,
   get view() { return view; },
   render: () => render(),
 });
@@ -1483,6 +1501,9 @@ document.addEventListener('click', async e => {
       }
       break;
     case 'export': exportBackup(); break;
+    case 'install-app':
+      if (installPrompt) { const p = installPrompt; installPrompt = null; await p.prompt(); render(); }
+      break;
     case 'create-household':
       welcomeAction(async () => {
         const code = makeHouseholdCode();
