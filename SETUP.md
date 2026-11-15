@@ -1,6 +1,6 @@
 # Meal Planner – setup
 
-Three steps, about 20 minutes in total, all free. Do them on a computer.
+Three steps, about 20 minutes in total, all free. Do them on a computer. (Steps 4 and 5 are extras you can do later.)
 
 ---
 
@@ -90,6 +90,21 @@ Until you do this, **Plan a trip** will say it couldn't create the trip.
 - **📅 Add ingredients for the trip's meals** (Shopping) builds the list, scaled to the number of people in all the families.
 - After the last day the other families are locked out automatically. You can still open it from **Settings**, change the dates to reopen it, or delete it.
 - **‹ Home** switches back to your own meal plan.
+
+---
+
+## Step 5 – Optional: your own recipe fetcher (more reliable web imports)
+
+Out of the box, **Get recipe** goes through free public services that are sometimes down, and some sites (Allrecipes, Serious Eats) refuse them. Your own fetcher on Cloudflare fixes both. It's free (100,000 requests a day), needs no card, and takes about 10 minutes.
+
+1. Go to <https://dash.cloudflare.com/sign-up> and create a free account (or sign in).
+2. In the left menu choose **Compute (Workers)** → **Workers & Pages** (it may just say **Workers & Pages**) → **Create** → **Create Worker** (pick the **Hello World** starter if asked).
+3. Name it `recipe-fetch` and click **Deploy**.
+4. Click **Edit code**. Delete everything in the code box, paste the whole of `cloudflare/recipe-fetch.js` from this folder, then click **Deploy** (top right).
+5. Copy the Worker's address, shown near the top, like `https://recipe-fetch.YOUR-NAME.workers.dev`.
+6. In the app: **Settings → Recipes from websites** → paste the address → **Save**. It checks the address before saving, and every phone in your household uses it from then on.
+
+The fetcher only answers your app's own web address, only fetches web pages and pictures, and stores nothing. If the app ever moves to a different web address, add it to the `ALLOWED_ORIGINS` list at the top of the code and deploy again.
 
 ---
 

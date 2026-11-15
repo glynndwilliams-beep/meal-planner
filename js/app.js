@@ -9,10 +9,10 @@ import {
 } from './ingredients.js';
 import { scanRecipe, makeThumbnail } from './scan.js';
 import { mountCropper } from './crop.js';
-import { importRecipe, findUrl } from './web.js';
+import { importRecipe, findUrl, testRelay } from './web.js';
 import { setupTrips, myTrips, currentTripCode } from './trip.js';
 
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.4.0';
 
 const DAYS = [
   { key: 'mon', label: 'Monday' },
@@ -232,7 +232,7 @@ function connect(store) {
   state.unsubs.push(
     store.subscribe('meta', docs => {
       const s = docs.find(d => d.id === 'settings');
-      state.settings = { days: mergeDays(s && s.days), pantry: (s && s.pantry) || [], people: (s && s.people) || null };
+      state.settings = { days: mergeDays(s && s.days), pantry: (s && s.pantry) || [], people: (s && s.people) || null, recipeFetch: (s && s.recipeFetch) || '' };
       const tr = docs.find(d => d.id === 'trips');
       state.householdTrips = (tr && tr.list) || {};
       done('meta');
@@ -657,6 +657,16 @@ function renderSettings() {
     html += `<div class="notice">Sharing isn’t switched on yet, so everything is saved on <b>this phone only</b>. Follow step 2 in SETUP.md to connect a free Firebase database; your existing recipes and plans will be copied across.</div>`;
   }
   html += '</div></div>';
+
+  const rf = state.settings.recipeFetch;
+  html += `<div class="section-title">Recipes from websites</div><div class="card"><div class="card-body stack">
+    ${rf ? `<p class="small" style="margin:0">✅ Using your own recipe fetcher, so sites like Allrecipes work and imports don’t depend on free public services.</p>
+      <div class="small muted" style="overflow-wrap:anywhere">${esc(rf)}</div>
+      <div class="row"><button class="btn grow" data-action="relay-test">Test it</button><button class="btn grow danger" data-action="relay-remove">Stop using it</button></div>`
+    : `<p class="small muted" style="margin:0">Imports currently go through free public services, which are sometimes down, and some sites (e.g. Allrecipes) refuse them. Your own free fetcher on Cloudflare fixes both – see Step 5 in SETUP.md, then paste its address here.</p>
+      <form id="relay-form" class="row"><input type="text" id="relay-input" class="grow" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="https://recipe-fetch….workers.dev"><button class="btn primary" type="submit">Save</button></form>`}
+    <div class="small" id="relay-msg" hidden></div>
+  </div></div>`;
 
   html += trips.settingsHtml();
 
@@ -1222,7 +1232,7 @@ function openEditor(id, { onSaved } = {}) {
     if (!url) { urlMsg.textContent = 'Paste the recipe’s web address first.'; return; }
     btn.disabled = true;
     try {
-      const rec = await importRecipe(url, m => { urlMsg.textContent = m; });
+      const rec = await importRecipe(url, m => { urlMsg.textContent = m; }, { relay: state.settings.recipeFetch });
       if (rec.title && !field('#ed-title').value.trim()) field('#ed-title').value = rec.title;
       if (rec.serves && !field('#ed-serves').value.trim()) field('#ed-serves').value = rec.serves;
       if (rec.ingredients.length) append('#ed-ings', rec.ingredients.join('\n'), '\n');
@@ -1372,7 +1382,7 @@ async function importBackup(file) {
 async function copyInto(store, data) {
   const ops = [];
   const strip = ({ id, ...v }) => v;
-  if (data.settings) ops.push({ op: 'set', col: 'meta', id: 'settings', val: { days: mergeDays(data.settings.days), pantry: data.settings.pantry || [], people: data.settings.people || null } });
+  if (data.settings) ops.push({ op: 'set', col: 'meta', id: 'settings', val: { days: mergeDays(data.settings.days), pantry: data.settings.pantry || [], people: data.settings.people || null, recipeFetch: data.settings.recipeFetch || '' } });
   for (const r of data.recipes || []) ops.push({ op: 'set', col: 'recipes', id: r.id, val: strip(r) });
   for (const p of data.plans || []) ops.push({ op: 'set', col: 'plans', id: p.id, val: strip(p) });
   for (const s of data.shopping || []) ops.push({ op: 'set', col: 'shopping', id: s.id, val: strip(s) });
@@ -1501,6 +1511,16 @@ document.addEventListener('click', async e => {
       }
       break;
     case 'export': exportBackup(); break;
+    case 'relay-test': {
+      try { await testRelay(state.settings.recipeFetch); toast('✅ Your recipe fetcher is working'); }
+      catch (err) { toast(`Not working: ${err.message}`); }
+      break;
+    }
+    case 'relay-remove':
+      if (confirm('Stop using your own recipe fetcher? Imports will go back to the free public services.')) {
+        await state.store.merge('meta', 'settings', { recipeFetch: '' });
+      }
+      break;
     case 'install-app':
       if (installPrompt) { const p = installPrompt; installPrompt = null; await p.prompt(); render(); }
       break;
@@ -1531,6 +1551,9 @@ document.addEventListener('input', e => {
 });
 
 document.addEventListener('submit', async e => {
+  // Every form in the app is handled here; stop the browser's own submit (a page reload)
+  // straight away – it must happen before the first `await` below or it's too late.
+  e.preventDefault();
   if (await trips.onSubmit(e)) return;
   if (e.target.id === 'shop-add') {
     e.preventDefault();
@@ -1539,6 +1562,21 @@ document.addEventListener('submit', async e => {
     state.shopDraft = '';
     await addToShopping([text], '');
     render();
+  }
+  if (e.target.id === 'relay-form') {
+    e.preventDefault();
+    const msg = $('#relay-msg');
+    const addr = findUrl($('#relay-input').value) || $('#relay-input').value.trim();
+    msg.hidden = false;
+    msg.textContent = 'Checking…';
+    try {
+      await testRelay(addr);
+      await state.store.merge('meta', 'settings', { recipeFetch: addr.replace(/\/+$/, '') });
+      toast('✅ Saved – web imports now use your own fetcher');
+    } catch (err) {
+      msg.textContent = `That didn’t work: ${err.message === 'Failed to fetch' || /HTTP|abort/i.test(err.message) ? 'couldn’t reach it. Check the address, and that it was deployed.' : err.message}`;
+    }
+    return;
   }
   if (e.target.id === 'pantry-add') {
     e.preventDefault();

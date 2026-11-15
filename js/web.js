@@ -3,8 +3,9 @@
 // we read that rather than scraping the page layout, so it keeps working when sites restyle.
 //
 // The app is a static site, so the browser isn't allowed to read other sites directly
-// (CORS). We try a direct fetch first, then fall back to free public relay services that
-// fetch the page for us. Only the recipe's web address is sent to them.
+// (CORS). Routes, in order: the household's own fetching service (cloudflare/recipe-fetch.js,
+// set in Settings) if there is one, a direct fetch, then free public relay services.
+// Only the recipe's web address is sent to them.
 import { makeThumbnail } from './scan.js';
 
 const RELAYS = [
@@ -32,10 +33,24 @@ async function fetchWithTimeout(url, ms = 15000) {
   } finally { clearTimeout(timer); }
 }
 
+/** The household's own service, e.g. https://recipe-fetch.name.workers.dev */
+const ownRoute = base => u => `${base.replace(/\/+$/, '')}/?url=${encodeURIComponent(u)}`;
+
+/** Check a fetching-service address: resolves true, or throws with a reason. */
+export async function testRelay(base) {
+  let u;
+  try { u = new URL(base); } catch { throw new Error('That doesn’t look like a web address'); }
+  if (u.protocol !== 'https:' && !/^(localhost|127\.0\.0\.1)$/.test(u.hostname)) throw new Error('The address should start with https://');
+  const res = await fetchWithTimeout(u.href, 10000);
+  const data = await res.json().catch(() => null);
+  if (!data || data.service !== 'meal-planner-recipe-fetch') throw new Error('Something answered, but it isn’t the recipe fetcher. Check the code was pasted and deployed.');
+  return true;
+}
+
 /** Fetch through each route in turn; `accept` decides whether a response is usable. */
-async function fetchAny(url, read, accept) {
+async function fetchAny(url, read, accept, relay) {
   let lastErr;
-  for (const route of [u => u, ...RELAYS]) {
+  for (const route of [...(relay ? [ownRoute(relay)] : []), u => u, ...RELAYS]) {
     try {
       const out = await read(await fetchWithTimeout(route(url)));
       if (accept(out)) return out;
@@ -132,7 +147,7 @@ function tagsFrom(r) {
   const raw = [r.recipeCategory, r.recipeCuisine, r.keywords].flat()
     .flatMap(x => text(x).split(/[,;|]/))
     .map(t => t.trim().toLowerCase().replace(/\s+recipes?$/, ''))
-    .filter(t => t && t.length <= 20 && !authors.has(t) && !/^\d|^recipe|^(new|easy recipes?|popular)$/.test(t));
+    .filter(t => t && t.length <= 20 && !authors.has(t) && !/^\d|^recipe|-tested$|^(new|easy recipes?|popular)$/.test(t));
   return [...new Set(raw)].slice(0, 8);
 }
 
@@ -178,13 +193,13 @@ export function parseRecipeHtml(html, pageUrl) {
 }
 
 /** Fetch a recipe page and return { title, serves, ingredients, method, meals, tags, photo, source }. */
-export async function importRecipe(url, onStatus = () => {}) {
+export async function importRecipe(url, onStatus = () => {}, { relay = '' } = {}) {
   let u;
   try { u = new URL(url); } catch { throw new Error('That doesn’t look like a web address'); }
   onStatus('Fetching the page…');
   let recipe;
   try {
-    recipe = await fetchAny(u.href, res => res.text().then(h => parseRecipeHtml(h, u.href)), r => !!r);
+    recipe = await fetchAny(u.href, res => res.text().then(h => parseRecipeHtml(h, u.href)), r => !!r, relay);
   } catch (err) {
     throw new Error(err.message === 'no recipe found'
       ? 'Couldn’t find a recipe on that page. Check it’s the recipe itself, not a list of recipes.'
@@ -194,7 +209,7 @@ export async function importRecipe(url, onStatus = () => {}) {
   if (recipe.image) {
     onStatus('Getting the photo…');
     try {
-      const blob = await fetchAny(recipe.image, res => res.blob(), b => b.size > 0 && /^image\//.test(b.type));
+      const blob = await fetchAny(recipe.image, res => res.blob(), b => b.size > 0 && /^image\//.test(b.type), relay);
       recipe.photo = await makeThumbnail(blob);
     } catch { /* recipe is still useful without a photo */ }
   }
