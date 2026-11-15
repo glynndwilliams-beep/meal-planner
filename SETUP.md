@@ -117,6 +117,8 @@ The fetcher only answers your app's own web address, only fetches web pages and 
 | See other weeks | **‹ ›** arrows at the top of the Plan |
 | Scan a recipe | **Recipes** → **+ New** → **📷 Take photo**. Scan extra pages the same way; each is added below. Check the text, fix any mistakes, then **Save**. |
 | Add a recipe from a website | On the recipe page tap **Share → Copy** (Safari) or **⋮ → Share → Copy** (Chrome on Android), or copy the address bar. Then **Recipes** → **+ New** → paste into the box at the top → **Get recipe**. Check it, then **Save**. Works with BBC Food, BBC Good Food and most recipe sites. |
+| Add a recipe from the Share menu | **iPhone:** set up the *Add to Meals* Shortcut once (steps in **Settings → Recipes from websites**), then on a recipe in Safari tap **Share → Add to Meals**. It opens the app in Safari with the recipe filled in – tap **Save**. The first time, join your household there with your code. **Android:** once the app is installed, tap **Share → Meals** on any recipe page. |
+| Paste a copied link | **Recipes → + New → 📋 Paste link & get recipe**. |
 | Cook from a recipe | Open it → **👩‍🍳 Start cooking**. Big steps, one at a time; the screen stays on. Tap a step to tick it off. At the end, rate it and add a note. |
 | Cook for more or fewer people | **Settings → Cooking for** sets your usual number. On a recipe, **− / +** next to *Serves* changes it for that recipe; amounts and the shopping list follow. |
 | Rate a recipe or add a note | Tap the stars on a recipe, or **✏️ Add a note**. **★ Favourites** on the Recipes tab shows 4–5 star recipes, and Suggest picks favourites more often. |

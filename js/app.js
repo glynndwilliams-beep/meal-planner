@@ -12,7 +12,7 @@ import { mountCropper } from './crop.js';
 import { importRecipe, findUrl, testRelay } from './web.js';
 import { setupTrips, myTrips, currentTripCode } from './trip.js';
 
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 
 const DAYS = [
   { key: 'mon', label: 'Monday' },
@@ -61,6 +61,26 @@ const state = {
   sheetRefresh: null,
   unsubs: [],
 };
+
+/* ---------------- recipe link handed to the app ---------------- */
+// iPhone Shortcut opens …/?import=<recipe address>; Android's share menu opens …/?url=…&text=….
+let pendingImport = '';
+{
+  const q = new URLSearchParams(location.search);
+  if (['import', 'url', 'text', 'title'].some(k => q.has(k))) {
+    pendingImport = findUrl([q.get('import'), q.get('url'), q.get('text'), q.get('title')].filter(Boolean).join(' '));
+    history.replaceState(null, '', location.pathname); // so a reload doesn't import it again
+  }
+}
+function runPendingImport() {
+  if (!pendingImport || !state.store) return;
+  const url = pendingImport;
+  pendingImport = '';
+  state.tab = 'recipes';
+  setTabbar();
+  render();
+  openEditor(null, { startUrl: url });
+}
 
 /* ---------------- helpers ---------------- */
 const $ = (s, r = document) => r.querySelector(s);
@@ -202,6 +222,28 @@ const isAndroid = /android/i.test(navigator.userAgent);
 let installPrompt = null;
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPrompt = e; scheduleRender(); });
 window.addEventListener('appinstalled', () => { installPrompt = null; toast('Meal Planner installed'); scheduleRender(); });
+
+/** The start of the link the iPhone Shortcut opens; the recipe's address goes on the end. */
+const importLinkBase = () => `${location.origin}${location.pathname}?import=`;
+
+/** Steps for adding recipes straight from the Share menu. */
+function shareMenuHelpHtml() {
+  const iphone = `<details class="small tip" ${isIOS ? 'open' : ''}><summary>iPhone: add “Add to Meals” to the Share menu (5 minutes, once)</summary>
+    <ol class="steps">
+      <li>Tap <button type="button" class="link-btn" data-action="copy-import-link">Copy the link</button> – you’ll paste it in step 5.</li>
+      <li>Open the <b>Shortcuts</b> app → <b>+</b>. Tap the name at the top, choose <b>Rename</b> and call it <b>Add to Meals</b>.</li>
+      <li>Tap <b>ⓘ</b> (or the name ▾ → <b>Details</b>) and turn on <b>Show in Share Sheet</b>, then <b>Done</b>.</li>
+      <li>Search the actions for <b>URL Encode</b> and add it. It should say <i>URL Encode Shortcut Input</i> (if not, tap the blue word and choose <b>Shortcut Input</b>).</li>
+      <li>Add a <b>Text</b> action. Paste the link, then tap <b>URL Encoded Text</b> in the bar above the keyboard so it sits straight after <code>import=</code>.</li>
+      <li>Add an <b>Open URLs</b> action (it uses the Text). Tap <b>Done</b>.</li>
+    </ol>
+    <p style="margin:6px 0 0">Then on a recipe in Safari tap <b>Share → Add to Meals</b>. It opens the app <b>in Safari</b> (iPhones don’t let shortcuts open home-screen apps) with the recipe being fetched – check it and tap <b>Save</b>. It’s saved to your household, so it’s in the home-screen app too. <b>The first time</b>, join your household there with your code: Safari keeps its own copy of the app.</p>
+  </details>`;
+  const android = `<details class="small tip" ${isAndroid ? 'open' : ''}><summary>Android: share recipes straight to the app</summary>
+    <p style="margin:6px 0 0">Install the app (Settings → Install, or Chrome’s ⋮ menu → <b>Add to Home screen / Install app</b>). Then on any recipe page tap <b>Share</b> and choose <b>Meals</b> – the app opens with the recipe being fetched. If you installed it before this update and Meals isn’t in the Share list, remove the app from your home screen and install it again.</p>
+  </details>`;
+  return `<div class="section-title" style="margin:8px 0 0">Add recipes from the Share menu</div>${isAndroid ? android + iphone : iphone + android}`;
+}
 
 /** How to put the app on this phone's home screen ('' once it's installed, or on a computer). */
 function installHintHtml() {
@@ -666,6 +708,7 @@ function renderSettings() {
     : `<p class="small muted" style="margin:0">Imports currently go through free public services, which are sometimes down, and some sites (e.g. Allrecipes) refuse them. Your own free fetcher on Cloudflare fixes both – see Step 5 in SETUP.md, then paste its address here.</p>
       <form id="relay-form" class="row"><input type="text" id="relay-input" class="grow" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="https://recipe-fetch….workers.dev"><button class="btn primary" type="submit">Save</button></form>`}
     <div class="small" id="relay-msg" hidden></div>
+    ${shareMenuHelpHtml()}
   </div></div>`;
 
   html += trips.settingsHtml();
@@ -1090,7 +1133,7 @@ function openPlanPicker(recipeId) {
   };
 }
 
-function openEditor(id, { onSaved } = {}) {
+function openEditor(id, { onSaved, startUrl = '' } = {}) {
   const r = id ? state.recipes.get(id) : null;
   let photo = (r && r.photo) || '';
   const { body } = openSheet(r ? 'Edit recipe' : 'New recipe', `
@@ -1098,6 +1141,7 @@ function openEditor(id, { onSaved } = {}) {
       <div class="card" style="margin:0"><div class="card-body stack">
         <div class="small muted">Copy a recipe’s web address (e.g. from BBC Food) and paste it here:</div>
         <div class="row"><input type="url" id="ed-url" class="grow" inputmode="url" autocapitalize="off" autocorrect="off" placeholder="https://www.bbc.co.uk/food/recipes/…"><button type="button" class="btn primary" data-act="import-url">Get recipe</button></div>
+        ${navigator.clipboard && navigator.clipboard.readText ? '<button type="button" class="btn block" data-act="paste-url">📋 Paste link &amp; get recipe</button>' : ''}
         <div class="small" id="url-msg" hidden></div>
       </div></div>
       <div class="card" style="margin:0"><div class="card-body stack">
@@ -1253,10 +1297,24 @@ function openEditor(id, { onSaved } = {}) {
     } finally { btn.disabled = false; }
   };
   field('#ed-url').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); importUrl(); } });
+  const pasteUrl = async () => {
+    let text = '';
+    try { text = await navigator.clipboard.readText(); } catch { /* refused: fall through */ }
+    const url = findUrl(text);
+    if (!url) {
+      urlMsg.hidden = false;
+      urlMsg.textContent = text ? 'There’s no web address on the clipboard. Copy the recipe’s link first.' : 'Couldn’t read the clipboard. Touch and hold in the box above and choose Paste.';
+      return;
+    }
+    field('#ed-url').value = url;
+    importUrl();
+  };
+  if (startUrl) { field('#ed-url').value = startUrl; importUrl(); }
 
   body.addEventListener('click', async e => {
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (act === 'import-url') importUrl();
+    if (act === 'paste-url') pasteUrl();
     const addTag = e.target.closest('[data-addtag]');
     if (addTag) {
       const have = field('#ed-tags').value.split(',').map(t => t.trim()).filter(Boolean);
@@ -1424,6 +1482,7 @@ async function enterHousehold(code, { created = false } = {}) {
   localStorage.setItem('mp-household', code);
   state.household = code;
   connect(store);
+  runPendingImport();
 }
 
 async function welcomeAction(fn) {
@@ -1511,6 +1570,12 @@ document.addEventListener('click', async e => {
       }
       break;
     case 'export': exportBackup(); break;
+    case 'copy-import-link': {
+      const link = importLinkBase();
+      try { await navigator.clipboard.writeText(link); toast('Link copied – now paste it into the Shortcut'); }
+      catch { prompt('Copy this link:', link); }
+      break;
+    }
     case 'relay-test': {
       try { await testRelay(state.settings.recipeFetch); toast('✅ Your recipe fetcher is working'); }
       catch (err) { toast(`Not working: ${err.message}`); }
@@ -1617,13 +1682,20 @@ async function boot() {
   const resumeTrip = currentTripCode();
   if (!firebaseConfig) {
     connect(new LocalStore());
-    if (resumeTrip) trips.open(resumeTrip, { quiet: true });
+    if (pendingImport) runPendingImport();
+    else if (resumeTrip) trips.open(resumeTrip, { quiet: true });
     return;
   }
 
   const code = localStorage.getItem('mp-household');
   if (!code) {
     // A phone that only joined a trip goes straight to it
+    if (pendingImport) {
+      // e.g. the iPhone Shortcut opened the app in Safari, which keeps its own copy of the app
+      renderWelcome('To add that recipe, first join your household here with your household code (Settings → Household sharing on your phone shows it). The recipe is then fetched for you. You only need to do this once.');
+      $('#welcome-msg').style.color = 'var(--text)';
+      return;
+    }
     const only = resumeTrip || Object.keys(myTrips())[0];
     if (only) { trips.open(only).catch(e => { console.error(e); renderWelcome(); }); return; }
     renderWelcome();
@@ -1631,8 +1703,9 @@ async function boot() {
   }
   view.innerHTML = '<p class="empty">Connecting to your household…</p>';
   try {
-    await enterHousehold(code);
-    if (resumeTrip) await trips.open(resumeTrip, { quiet: true });
+    const importing = !!pendingImport;
+    await enterHousehold(code); // also starts a recipe import handed to the app
+    if (resumeTrip && !importing) await trips.open(resumeTrip, { quiet: true });
   } catch (e) {
     console.error(e);
     view.innerHTML = `<div class="empty"><span class="big">📡</span>Couldn’t connect to your household.<br>${esc(e.code || e.message)}
