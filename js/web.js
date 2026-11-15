@@ -215,14 +215,37 @@ export function parseRecipeHtml(html, pageUrl) {
   };
 }
 
+/**
+ * The iPhone Shortcut can read the recipe straight off the page open in Safari (see
+ * PAGE_SCRIPT) and hand it over as { u: page address, s: site name, l: [recipe JSON-LD], m: microdata HTML }.
+ * Nothing needs fetching then, so it works even on sites that block fetchers (e.g. BBC).
+ */
+export function parsePageData(page) {
+  if (!page || typeof page.u !== 'string') return null;
+  try { new URL(page.u); } catch { return null; }
+  const attr = s => String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  const html = `<meta property="og:site_name" content="${attr(page.s)}">`
+    + (Array.isArray(page.l) ? page.l : []).map(t => `<script type="application/ld+json">${String(t).replace(/<\/script/gi, '<\\/script')}</script>`).join('')
+    + (typeof page.m === 'string' ? page.m : '');
+  return parseRecipeHtml(html, page.u);
+}
+
+/** What the iPhone Shortcut's "Run JavaScript on Web Page" action runs (pasted in by the user). */
+export const PAGE_SCRIPT = `var l=[],drop={review:1,reviews:1,video:1,comment:1,aggregateRating:1,interactionStatistic:1};
+function trim(o){if(Array.isArray(o))return o.map(trim);if(o&&typeof o=='object'){for(var k in o){if(drop[k])delete o[k];else o[k]=trim(o[k]);}}return o;}
+document.querySelectorAll('script[type="application/ld+json"]').forEach(function(s){if(/Recipe/.test(s.textContent)){try{l.push(JSON.stringify(trim(JSON.parse(s.textContent))));}catch(e){l.push(s.textContent);}}});
+var md=l.length?'':((document.querySelector('[itemtype*="schema.org/Recipe"]')||{}).outerHTML||'').slice(0,60000);
+var sn=document.querySelector('meta[property="og:site_name"]');
+completion(JSON.stringify({u:location.href,s:sn?sn.content:'',l:l,m:md}));`;
+
 /** Fetch a recipe page and return { title, serves, ingredients, method, meals, tags, photo, source }. */
-export async function importRecipe(url, onStatus = () => {}, { relay = '' } = {}) {
+export async function importRecipe(url, onStatus = () => {}, { relay = '', page = null } = {}) {
   let u;
   try { u = new URL(url); } catch { throw new Error('That doesn’t look like a web address'); }
-  onStatus('Fetching the page…');
-  let recipe;
+  let recipe = page ? parsePageData(page) : null;
+  if (!recipe) onStatus('Fetching the page…');
   try {
-    recipe = await fetchAny(u.href, res => res.text().then(h => parseRecipeHtml(h, u.href)), r => !!r, relay);
+    recipe = recipe || await fetchAny(u.href, res => res.text().then(h => parseRecipeHtml(h, u.href)), r => !!r, relay);
   } catch (err) {
     if (err.notFound) throw new Error('Couldn’t find a recipe on that page. Check it’s the recipe itself, not a list of recipes.');
     if (err.own) throw new Error(`Couldn’t get that page. Your recipe fetcher said: “${err.own}”. Check the address is right and try again.`);

@@ -9,10 +9,10 @@ import {
 } from './ingredients.js';
 import { scanRecipe, makeThumbnail } from './scan.js';
 import { mountCropper } from './crop.js';
-import { importRecipe, findUrl, testRelay } from './web.js';
+import { importRecipe, findUrl, testRelay, PAGE_SCRIPT } from './web.js';
 import { setupTrips, myTrips, currentTripCode } from './trip.js';
 
-const APP_VERSION = '1.5.1';
+const APP_VERSION = '1.6.0';
 
 const DAYS = [
   { key: 'mon', label: 'Monday' },
@@ -63,24 +63,31 @@ const state = {
 };
 
 /* ---------------- recipe link handed to the app ---------------- */
-// iPhone Shortcut opens …/?import=<recipe address>; Android's share menu opens …/?url=…&text=….
+// iPhone Shortcut opens …/?import=<recipe address>, or ?import=<recipe data read off the page in
+// Safari> (a JSON object, see PAGE_SCRIPT in web.js). Android's share menu opens …/?url=…&text=….
 let pendingImport = '';
+let pendingPage = null;
 {
   const q = new URLSearchParams(location.search);
   if (['import', 'url', 'text', 'title'].some(k => q.has(k))) {
-    pendingImport = findUrl([q.get('import'), q.get('url'), q.get('text'), q.get('title')].filter(Boolean).join(' '));
+    const raw = (q.get('import') || '').trim();
+    if (raw.startsWith('{')) {
+      try { const p = JSON.parse(raw); if (p && typeof p.u === 'string') { pendingPage = p; pendingImport = findUrl(p.u); } } catch { /* not page data */ }
+    }
+    if (!pendingImport) pendingImport = findUrl([raw, q.get('url'), q.get('text'), q.get('title')].filter(Boolean).join(' '));
     history.replaceState(null, '', location.pathname); // so a reload doesn't import it again
   }
 }
 function runPendingImport() {
   // Wait for the household's settings, so the import uses its own recipe fetcher.
   if (!pendingImport || !state.store || !state.loaded.has('meta')) return;
-  const url = pendingImport;
+  const url = pendingImport, page = pendingPage;
   pendingImport = '';
+  pendingPage = null;
   state.tab = 'recipes';
   setTabbar();
   render();
-  openEditor(null, { startUrl: url });
+  openEditor(null, { startUrl: url, startPage: page });
 }
 
 /* ---------------- helpers ---------------- */
@@ -230,15 +237,18 @@ const importLinkBase = () => `${location.origin}${location.pathname}?import=`;
 /** Steps for adding recipes straight from the Share menu. */
 function shareMenuHelpHtml() {
   const iphone = `<details class="small tip" ${isIOS ? 'open' : ''}><summary>iPhone: add “Add to Meals” to the Share menu (5 minutes, once)</summary>
+    <p style="margin:6px 0 0">The Shortcut reads the recipe straight off the page you’re looking at, so it works even on sites that block fetching (like BBC).</p>
     <ol class="steps">
-      <li>Tap <button type="button" class="link-btn" data-action="copy-import-link">Copy the link</button> – you’ll paste it in step 5.</li>
+      <li>In the iPhone’s <b>Settings</b> app → <b>Apps</b> → <b>Shortcuts</b> → <b>Advanced</b>, turn on <b>Allow Running Scripts</b>. (On older iPhones: Settings → Shortcuts → Advanced.)</li>
       <li>Open the <b>Shortcuts</b> app → <b>+</b>. Tap the name at the top, choose <b>Rename</b> and call it <b>Add to Meals</b>.</li>
       <li>Tap <b>ⓘ</b> (or the name ▾ → <b>Details</b>) and turn on <b>Show in Share Sheet</b>, then <b>Done</b>.</li>
-      <li>Search the actions for <b>URL Encode</b> and add it. It should say <i>URL Encode Shortcut Input</i> (if not, tap the blue word and choose <b>Shortcut Input</b>).</li>
-      <li>Add a <b>Text</b> action. Paste the link, then tap <b>URL Encoded Text</b> in the bar above the keyboard so it sits straight after <code>import=</code>.</li>
+      <li>Tap <button type="button" class="link-btn" data-action="copy-page-script">Copy the script</button>. In Shortcuts, search the actions for <b>Run JavaScript on Web Page</b> and add it. Tap in its code, select all, delete, and <b>Paste</b>. (It should say <i>Run JavaScript on Shortcut Input</i>.)</li>
+      <li>Search for <b>URL Encode</b> and add it. Tap its blue input word and choose <b>JavaScript Result</b>.</li>
+      <li>Tap <button type="button" class="link-btn" data-action="copy-import-link">Copy the link</button>. Add a <b>Text</b> action, paste the link, then tap <b>URL Encoded Text</b> in the bar above the keyboard so it sits straight after <code>import=</code>.</li>
       <li>Add an <b>Open URLs</b> action (it uses the Text). Tap <b>Done</b>.</li>
     </ol>
-    <p style="margin:6px 0 0">Then on a recipe in Safari tap <b>Share → Add to Meals</b>. It opens the app <b>in Safari</b> (iPhones don’t let shortcuts open home-screen apps) with the recipe being fetched – check it and tap <b>Save</b>. It’s saved to your household, so it’s in the home-screen app too. <b>The first time</b>, join your household there with your code: Safari keeps its own copy of the app.</p>
+    <p style="margin:6px 0 0"><b>Made the shorter version before?</b> Open it in Shortcuts, add <b>Run JavaScript on Web Page</b> (step 4) and drag it to the top, just under the grey <i>Receive</i> block. Then tap the <b>URL Encode</b> action’s blue word and choose <b>JavaScript Result</b>. Do step 1 too.</p>
+    <p style="margin:6px 0 0">Then on a recipe in Safari tap <b>Share → Add to Meals</b>. The first time on each site it asks to run on that site – tap <b>Always Allow</b>. It opens the app <b>in Safari</b> (iPhones don’t let shortcuts open home-screen apps) with the recipe filled in – check it and tap <b>Save</b>. It’s saved to your household, so it’s in the home-screen app too. <b>The very first time</b>, join your household there with your code: Safari keeps its own copy of the app.</p>
   </details>`;
   const android = `<details class="small tip" ${isAndroid ? 'open' : ''}><summary>Android: share recipes straight to the app</summary>
     <p style="margin:6px 0 0">Install the app (Settings → Install, or Chrome’s ⋮ menu → <b>Add to Home screen / Install app</b>). Then on any recipe page tap <b>Share</b> and choose <b>Meals</b> – the app opens with the recipe being fetched. If you installed it before this update and Meals isn’t in the Share list, remove the app from your home screen and install it again.</p>
@@ -1135,7 +1145,7 @@ function openPlanPicker(recipeId) {
   };
 }
 
-function openEditor(id, { onSaved, startUrl = '' } = {}) {
+function openEditor(id, { onSaved, startUrl = '', startPage = null } = {}) {
   const r = id ? state.recipes.get(id) : null;
   let photo = (r && r.photo) || '';
   const { body } = openSheet(r ? 'Edit recipe' : 'New recipe', `
@@ -1271,14 +1281,14 @@ function openEditor(id, { onSaved, startUrl = '' } = {}) {
 
   // Import from a web page: fills empty fields, adds to ingredients/method if already filled
   const urlMsg = $('#url-msg', body);
-  const importUrl = async () => {
+  const importUrl = async (page = null) => {
     const btn = $('[data-act="import-url"]', body);
     const url = findUrl(field('#ed-url').value);
     urlMsg.hidden = false;
     if (!url) { urlMsg.textContent = 'Paste the recipe’s web address first.'; return; }
     btn.disabled = true;
     try {
-      const rec = await importRecipe(url, m => { urlMsg.textContent = m; }, { relay: state.settings.recipeFetch });
+      const rec = await importRecipe(url, m => { urlMsg.textContent = m; }, { relay: state.settings.recipeFetch, page });
       if (rec.title && !field('#ed-title').value.trim()) field('#ed-title').value = rec.title;
       if (rec.serves && !field('#ed-serves').value.trim()) field('#ed-serves').value = rec.serves;
       if (rec.ingredients.length) append('#ed-ings', rec.ingredients.join('\n'), '\n');
@@ -1311,7 +1321,7 @@ function openEditor(id, { onSaved, startUrl = '' } = {}) {
     field('#ed-url').value = url;
     importUrl();
   };
-  if (startUrl) { field('#ed-url').value = startUrl; importUrl(); }
+  if (startUrl) { field('#ed-url').value = startUrl; importUrl(startPage); }
 
   body.addEventListener('click', async e => {
     const act = e.target.closest('[data-act]')?.dataset.act;
@@ -1572,6 +1582,11 @@ document.addEventListener('click', async e => {
       }
       break;
     case 'export': exportBackup(); break;
+    case 'copy-page-script': {
+      try { await navigator.clipboard.writeText(PAGE_SCRIPT); toast('Script copied – now paste it into Run JavaScript on Web Page'); }
+      catch { prompt('Copy this script:', PAGE_SCRIPT); }
+      break;
+    }
     case 'copy-import-link': {
       const link = importLinkBase();
       try { await navigator.clipboard.writeText(link); toast('Link copied – now paste it into the Shortcut'); }
