@@ -234,13 +234,19 @@ export function parsePageData(page) {
 
 /**
  * What the iPhone Shortcut's "Run JavaScript on Web Page" action runs (pasted in by the user).
- * It keeps only what the app uses (no reviews, nutrition, videos…) and packs it as
- * MPR2<base64url>zz: compact, and made only of letters, digits, - and _, which Shortcuts'
- * URL Encode leaves alone (so it can't double in size). No full stop: the Shortcut's
- * Open URLs step treats "." as the end of a sentence and cuts the link there. The closing
- * "zz" lets the app tell if the end was cut off.
+ * It keeps only what the app uses (no reviews, nutrition, videos…), packs it as
+ * MPR2<base64url>zz (the "zz" lets the app tell if the end was cut off) and then opens the
+ * app itself, in the same Safari tab: <app>?import=MPR2…zz. The Shortcut needs no URL Encode,
+ * Text or Open URLs actions – those mangled long links (cutting at "." or refusing long runs
+ * of letters). The Back button returns to the recipe page.
  */
-export const PAGE_SCRIPT = `function isR(o){var t=o&&o['@type'];return t=='Recipe'||(Array.isArray(t)&&t.indexOf('Recipe')>=0);}
+export function makePageScript(appImportBase) {
+  return PAGE_SCRIPT_BODY + `
+var link=${JSON.stringify(appImportBase)}+'MPR2'+btoa(unescape(encodeURIComponent(j))).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'')+'zz';
+location.href=link;completion('');`;
+}
+
+const PAGE_SCRIPT_BODY = `function isR(o){var t=o&&o['@type'];return t=='Recipe'||(Array.isArray(t)&&t.indexOf('Recipe')>=0);}
 function find(o,d){if(!o||typeof o!='object'||d>6)return null;if(Array.isArray(o)){for(var i=0;i<o.length;i++){var a=find(o[i],d+1);if(a)return a;}return null;}if(isR(o))return o;var ks=['@graph','mainEntity','mainEntityOfPage','itemListElement','item'];for(var j=0;j<ks.length;j++){var b=find(o[ks[j]],d+1);if(b)return b;}return null;}
 function steps(v){if(v==null)return v;if(typeof v=='string')return v;if(Array.isArray(v))return v.map(steps);var t=String(v['@type']||'');if(/Section/.test(t))return{'@type':'HowToSection',name:v.name,itemListElement:steps(v.itemListElement)};if(v.itemListElement)return steps(v.itemListElement);return v.text||v.description||v.name||'';}
 function pic(v){if(Array.isArray(v))v=v[0];return v&&typeof v=='object'?(v.url||v.contentUrl||''):(v||'');}
@@ -249,8 +255,7 @@ var rec=null;document.querySelectorAll('script[type="application/ld+json"]').for
 var r=null;if(rec){r={'@type':'Recipe',name:rec.name||rec.headline,recipeYield:rec.recipeYield||rec.yield,recipeIngredient:rec.recipeIngredient||rec.ingredients,recipeInstructions:steps(rec.recipeInstructions),image:pic(rec.image),recipeCategory:rec.recipeCategory,recipeCuisine:rec.recipeCuisine,keywords:rec.keywords,author:names(rec.author)};}
 else{var sc=document.querySelector('[itemtype*="schema.org/Recipe"]');if(sc){var g=function(p){return Array.prototype.map.call(sc.querySelectorAll('[itemprop="'+p+'"]'),function(e){return(e.getAttribute('content')||e.getAttribute('src')||e.textContent||'').trim();});};r={'@type':'Recipe',name:g('name')[0],recipeYield:g('recipeYield')[0],recipeIngredient:g('recipeIngredient').length?g('recipeIngredient'):g('ingredients'),recipeInstructions:g('recipeInstructions'),image:g('image')[0]};}}
 var sn=document.querySelector('meta[property="og:site_name"]');
-var j=JSON.stringify({u:location.href,s:sn?sn.content:'',r:r});
-completion('MPR2'+btoa(unescape(encodeURIComponent(j))).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'')+'zz');`;
+var j=JSON.stringify({u:location.href,s:sn?sn.content:'',r:r});`;
 
 function unpack(b64url) {
   const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');

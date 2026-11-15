@@ -9,10 +9,10 @@ import {
 } from './ingredients.js';
 import { scanRecipe, makeThumbnail } from './scan.js';
 import { mountCropper } from './crop.js';
-import { importRecipe, findUrl, testRelay, PAGE_SCRIPT, readImportParam } from './web.js';
+import { importRecipe, findUrl, testRelay, makePageScript, readImportParam } from './web.js';
 import { setupTrips, myTrips, currentTripCode } from './trip.js';
 
-const APP_VERSION = '1.6.4';
+const APP_VERSION = '1.7.0';
 
 const DAYS = [
   { key: 'mon', label: 'Monday' },
@@ -64,7 +64,7 @@ const state = {
 
 /* ---------------- recipe link handed to the app ---------------- */
 // iPhone Shortcut opens …/?import=<recipe address>, or ?import=<recipe data read off the page in
-// Safari> (a JSON object, see PAGE_SCRIPT in web.js). Android's share menu opens …/?url=…&text=….
+// Safari> (see makePageScript in web.js). Android's share menu opens …/?url=…&text=….
 let pendingImport = '';
 let pendingPage = null;
 let pendingProblem = ''; // the Shortcut opened the app but sent nothing usable: say so
@@ -258,19 +258,17 @@ const importLinkBase = () => `${location.origin}${location.pathname}?import=`;
 
 /** Steps for adding recipes straight from the Share menu. */
 function shareMenuHelpHtml() {
-  const iphone = `<details class="small tip" ${isIOS ? 'open' : ''}><summary>iPhone: add “Add to Meals” to the Share menu (5 minutes, once)</summary>
-    <p style="margin:6px 0 0">The Shortcut reads the recipe straight off the page you’re looking at, so it works even on sites that block fetching (like BBC).</p>
+  const iphone = `<details class="small tip" ${isIOS ? 'open' : ''}><summary>iPhone: add “Add to Meals” to the Share menu (3 minutes, once)</summary>
+    <p style="margin:6px 0 0">The Shortcut reads the recipe straight off the page you’re looking at, so it works even on sites that block fetching (like BBC). It has just one action.</p>
     <ol class="steps">
       <li>In the iPhone’s <b>Settings</b> app → <b>Apps</b> → <b>Shortcuts</b> → <b>Advanced</b>, turn on <b>Allow Running Scripts</b>. (On older iPhones: Settings → Shortcuts → Advanced.)</li>
       <li>Open the <b>Shortcuts</b> app → <b>+</b>. Tap the name at the top, choose <b>Rename</b> and call it <b>Add to Meals</b>.</li>
       <li>Tap <b>ⓘ</b> (or the name ▾ → <b>Details</b>) and turn on <b>Show in Share Sheet</b>, then <b>Done</b>.</li>
-      <li>Tap <button type="button" class="link-btn" data-action="copy-page-script">Copy the script</button>. In Shortcuts, search the actions for <b>Run JavaScript on Web Page</b> and add it. Tap in its code, select all, delete, and <b>Paste</b>. (It should say <i>Run JavaScript on Shortcut Input</i>.)</li>
-      <li>Search for <b>URL Encode</b> and add it. Tap its blue input word and choose <b>JavaScript Result</b>.</li>
-      <li>Tap <button type="button" class="link-btn" data-action="copy-import-link">Copy the link</button>. Add a <b>Text</b> action, paste the link, then tap <b>URL Encoded Text</b> in the bar above the keyboard so it sits straight after <code>import=</code>.</li>
-      <li>Add an <b>Open URLs</b> action (it uses the Text). Tap <b>Done</b>.</li>
+      <li>Tap <button type="button" class="link-btn" data-action="copy-page-script">Copy the script</button>. In Shortcuts, search the actions for <b>Run JavaScript on Web Page</b> and add it. Clear its sample code (tap at the end and hold ⌫) and <b>Paste</b>. It should say <i>Run JavaScript on Shortcut Input</i>.</li>
+      <li>Tap <b>Done</b>. That’s all – no other actions.</li>
     </ol>
-    <p style="margin:6px 0 0"><b>Made the shorter version before?</b> Open it in Shortcuts, add <b>Run JavaScript on Web Page</b> (step 4) and drag it to the top, just under the grey <i>Receive</i> block. Then tap the <b>URL Encode</b> action’s blue word and choose <b>JavaScript Result</b>. Do step 1 too.</p>
-    <p style="margin:6px 0 0">Then on a recipe in Safari tap <b>Share → Add to Meals</b>. The first time on each site it asks to run on that site – tap <b>Always Allow</b>. It opens the app <b>in Safari</b> (iPhones don’t let shortcuts open home-screen apps) with the recipe filled in – check it and tap <b>Save</b>. It’s saved to your household, so it’s in the home-screen app too. <b>The very first time</b>, join your household there with your code: Safari keeps its own copy of the app.</p>
+    <p style="margin:6px 0 0"><b>Made it before, with URL Encode, Text and Open URLs?</b> Delete those three actions, then paste the new script over the old one (step 4). Only the grey <i>Receive</i> block and <b>Run JavaScript on Web Page</b> should be left.</p>
+    <p style="margin:6px 0 0">Then on a recipe in Safari tap <b>Share → Add to Meals</b>. The first time on each site it asks to run on that site – tap <b>Always Allow</b>. The same Safari tab switches to the app with the recipe filled in (iPhones don’t let shortcuts open home-screen apps) – check it and tap <b>Save</b>; the Back button returns to the recipe page. It’s saved to your household, so it’s in the home-screen app too. <b>The very first time</b>, join your household there with your code: Safari keeps its own copy of the app.</p>
   </details>`;
   const android = `<details class="small tip" ${isAndroid ? 'open' : ''}><summary>Android: share recipes straight to the app</summary>
     <p style="margin:6px 0 0">Install the app (Settings → Install, or Chrome’s ⋮ menu → <b>Add to Home screen / Install app</b>). Then on any recipe page tap <b>Share</b> and choose <b>Meals</b> – the app opens with the recipe being fetched. If you installed it before this update and Meals isn’t in the Share list, remove the app from your home screen and install it again.</p>
@@ -1605,8 +1603,9 @@ document.addEventListener('click', async e => {
       break;
     case 'export': exportBackup(); break;
     case 'copy-page-script': {
-      try { await navigator.clipboard.writeText(PAGE_SCRIPT); toast('Script copied – now paste it into Run JavaScript on Web Page'); }
-      catch { prompt('Copy this script:', PAGE_SCRIPT); }
+      const script = makePageScript(importLinkBase());
+      try { await navigator.clipboard.writeText(script); toast('Script copied – now paste it into Run JavaScript on Web Page'); }
+      catch { prompt('Copy this script:', script); }
       break;
     }
     case 'copy-import-link': {
