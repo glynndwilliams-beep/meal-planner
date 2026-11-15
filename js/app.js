@@ -9,10 +9,10 @@ import {
 } from './ingredients.js';
 import { scanRecipe, makeThumbnail } from './scan.js';
 import { mountCropper } from './crop.js';
-import { importRecipe, findUrl, testRelay, PAGE_SCRIPT } from './web.js';
+import { importRecipe, findUrl, testRelay, PAGE_SCRIPT, readImportParam } from './web.js';
 import { setupTrips, myTrips, currentTripCode } from './trip.js';
 
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.6.2';
 
 const DAYS = [
   { key: 'mon', label: 'Monday' },
@@ -67,27 +67,43 @@ const state = {
 // Safari> (a JSON object, see PAGE_SCRIPT in web.js). Android's share menu opens …/?url=…&text=….
 let pendingImport = '';
 let pendingPage = null;
+let pendingProblem = ''; // the Shortcut opened the app but sent nothing usable: say so
+let pendingNote = '';    // what the Shortcut sent, shown if its import fails
 {
   const q = new URLSearchParams(location.search);
   if (['import', 'url', 'text', 'title'].some(k => q.has(k))) {
     const raw = (q.get('import') || '').trim();
-    if (raw.startsWith('{')) {
-      try { const p = JSON.parse(raw); if (p && typeof p.u === 'string') { pendingPage = p; pendingImport = findUrl(p.u); } } catch { /* not page data */ }
-    }
+    const page = readImportParam(raw);
+    if (page) { pendingPage = page; pendingImport = findUrl(page.u); }
     if (!pendingImport) pendingImport = findUrl([raw, q.get('url'), q.get('text'), q.get('title')].filter(Boolean).join(' '));
+    // Sent more than a plain link but it wasn't usable recipe data: keep a sample to show if the import fails
+    if (pendingImport && !pendingPage && raw.length > pendingImport.length + 10) pendingNote = raw.slice(0, 90);
+    if (!pendingImport) {
+      pendingProblem = raw
+        ? `The Shortcut sent something the app couldn’t use: “${raw.slice(0, 80)}${raw.length > 80 ? '…' : ''}”.`
+        : 'The Shortcut opened the app but sent nothing after “import=”.';
+    }
     history.replaceState(null, '', location.pathname); // so a reload doesn't import it again
   }
 }
 function runPendingImport() {
+  if (pendingProblem && state.store) {
+    const msg = pendingProblem;
+    pendingProblem = '';
+    openSheet('Nothing to import', `<div class="stack"><p style="margin:0">${esc(msg)}</p>
+      <p class="small muted" style="margin:0">In the Shortcuts app, open <b>Add to Meals</b> and check the <b>Text</b> action ends with <code>import=</code> followed straight away by the coloured <b>URL Encoded Text</b> chip, and that <b>URL Encode</b> uses <b>JavaScript Result</b>. Steps: Settings → Recipes from websites.</p></div>`);
+    return;
+  }
   // Wait for the household's settings, so the import uses its own recipe fetcher.
   if (!pendingImport || !state.store || !state.loaded.has('meta')) return;
-  const url = pendingImport, page = pendingPage;
+  const url = pendingImport, page = pendingPage, note = pendingNote;
   pendingImport = '';
   pendingPage = null;
+  pendingNote = '';
   state.tab = 'recipes';
   setTabbar();
   render();
-  openEditor(null, { startUrl: url, startPage: page });
+  openEditor(null, { startUrl: url, startPage: page, startNote: note });
 }
 
 /* ---------------- helpers ---------------- */
@@ -289,7 +305,7 @@ function connect(store) {
       const tr = docs.find(d => d.id === 'trips');
       state.householdTrips = (tr && tr.list) || {};
       done('meta');
-      if (pendingImport) runPendingImport();
+      if (pendingImport || pendingProblem) runPendingImport();
     }, onErr),
     store.subscribe('recipes', docs => { state.recipes = new Map(docs.map(d => [d.id, d])); done('recipes'); }, onErr),
     store.subscribe('plans', docs => { state.plans = new Map(docs.map(d => [d.id, d])); done('plans'); }, onErr),
@@ -1145,7 +1161,7 @@ function openPlanPicker(recipeId) {
   };
 }
 
-function openEditor(id, { onSaved, startUrl = '', startPage = null } = {}) {
+function openEditor(id, { onSaved, startUrl = '', startPage = null, startNote = '' } = {}) {
   const r = id ? state.recipes.get(id) : null;
   let photo = (r && r.photo) || '';
   const { body } = openSheet(r ? 'Edit recipe' : 'New recipe', `
@@ -1281,7 +1297,7 @@ function openEditor(id, { onSaved, startUrl = '', startPage = null } = {}) {
 
   // Import from a web page: fills empty fields, adds to ingredients/method if already filled
   const urlMsg = $('#url-msg', body);
-  const importUrl = async (page = null) => {
+  const importUrl = async (page = null, note = '') => {
     const btn = $('[data-act="import-url"]', body);
     const url = findUrl(field('#ed-url').value);
     urlMsg.hidden = false;
@@ -1305,7 +1321,7 @@ function openEditor(id, { onSaved, startUrl = '', startPage = null } = {}) {
       urlMsg.textContent = `Got “${rec.title}”: ${n} ingredient${n === 1 ? '' : 's'}${rec.method ? ' and the method' : ''}. Check it below, then Save.`;
     } catch (err) {
       console.error(err);
-      urlMsg.textContent = err.message || String(err);
+      urlMsg.textContent = (err.message || String(err)) + (note ? ` (The Shortcut sent: “${note}…”)` : '');
     } finally { btn.disabled = false; }
   };
   field('#ed-url').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); importUrl(); } });
@@ -1321,7 +1337,7 @@ function openEditor(id, { onSaved, startUrl = '', startPage = null } = {}) {
     field('#ed-url').value = url;
     importUrl();
   };
-  if (startUrl) { field('#ed-url').value = startUrl; importUrl(startPage); }
+  if (startUrl) { field('#ed-url').value = startUrl; importUrl(startPage, startNote); }
 
   body.addEventListener('click', async e => {
     const act = e.target.closest('[data-act]')?.dataset.act;
@@ -1699,7 +1715,7 @@ async function boot() {
   const resumeTrip = currentTripCode();
   if (!firebaseConfig) {
     connect(new LocalStore());
-    if (pendingImport) runPendingImport();
+    if (pendingImport || pendingProblem) runPendingImport();
     else if (resumeTrip) trips.open(resumeTrip, { quiet: true });
     return;
   }

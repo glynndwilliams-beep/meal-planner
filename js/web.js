@@ -236,7 +236,24 @@ function trim(o){if(Array.isArray(o))return o.map(trim);if(o&&typeof o=='object'
 document.querySelectorAll('script[type="application/ld+json"]').forEach(function(s){if(/Recipe/.test(s.textContent)){try{l.push(JSON.stringify(trim(JSON.parse(s.textContent))));}catch(e){l.push(s.textContent);}}});
 var md=l.length?'':((document.querySelector('[itemtype*="schema.org/Recipe"]')||{}).outerHTML||'').slice(0,60000);
 var sn=document.querySelector('meta[property="og:site_name"]');
-completion(JSON.stringify({u:location.href,s:sn?sn.content:'',l:l,m:md}));`;
+completion('MPRECIPE:'+encodeURIComponent(JSON.stringify({u:location.href,s:sn?sn.content:'',l:l,m:md})));`;
+// The MPRECIPE: label keeps Shortcuts from turning the result into a "Dictionary" and changing it,
+// and encoding it here means characters Shortcuts' URL Encode leaves alone (like &) can't break the link.
+
+/** Turn whatever arrived after ?import= back into page data, or null. Copes with being encoded once or twice. */
+export function readImportParam(raw) {
+  let t = String(raw || '').trim();
+  for (let i = 0; i < 3; i++) {
+    t = t.replace(/^MPRECIPE(:|%3A)\s*/i, '');
+    if (t.startsWith('{')) break;
+    if (!/^%7B/i.test(t)) return null;
+    try { t = decodeURIComponent(t); } catch { return null; }
+  }
+  try {
+    const p = JSON.parse(t);
+    return p && typeof p.u === 'string' ? p : null;
+  } catch { return null; }
+}
 
 /** Fetch a recipe page and return { title, serves, ingredients, method, meals, tags, photo, source }. */
 export async function importRecipe(url, onStatus = () => {}, { relay = '', page = null } = {}) {
