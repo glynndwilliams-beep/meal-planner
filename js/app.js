@@ -12,7 +12,7 @@ import { mountCropper } from './crop.js';
 import { importRecipe, findUrl, testRelay } from './web.js';
 import { setupTrips, myTrips, currentTripCode } from './trip.js';
 
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.5.1';
 
 const DAYS = [
   { key: 'mon', label: 'Monday' },
@@ -73,7 +73,8 @@ let pendingImport = '';
   }
 }
 function runPendingImport() {
-  if (!pendingImport || !state.store) return;
+  // Wait for the household's settings, so the import uses its own recipe fetcher.
+  if (!pendingImport || !state.store || !state.loaded.has('meta')) return;
   const url = pendingImport;
   pendingImport = '';
   state.tab = 'recipes';
@@ -278,6 +279,7 @@ function connect(store) {
       const tr = docs.find(d => d.id === 'trips');
       state.householdTrips = (tr && tr.list) || {};
       done('meta');
+      if (pendingImport) runPendingImport();
     }, onErr),
     store.subscribe('recipes', docs => { state.recipes = new Map(docs.map(d => [d.id, d])); done('recipes'); }, onErr),
     store.subscribe('plans', docs => { state.plans = new Map(docs.map(d => [d.id, d])); done('plans'); }, onErr),
@@ -1639,7 +1641,7 @@ document.addEventListener('submit', async e => {
       await state.store.merge('meta', 'settings', { recipeFetch: addr.replace(/\/+$/, '') });
       toast('✅ Saved – web imports now use your own fetcher');
     } catch (err) {
-      msg.textContent = `That didn’t work: ${err.message === 'Failed to fetch' || /HTTP|abort/i.test(err.message) ? 'couldn’t reach it. Check the address, and that it was deployed.' : err.message}`;
+      msg.textContent = `That didn’t work: ${/reached|too long|HTTP/i.test(err.message) ? 'couldn’t reach it. Check the address, and that it was deployed.' : err.message}`;
     }
     return;
   }

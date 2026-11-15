@@ -28,8 +28,16 @@ async function fetchWithTimeout(url, ms = 15000) {
   const timer = setTimeout(() => ctl.abort(), ms);
   try {
     const res = await fetch(url, { signal: ctl.signal, credentials: 'omit' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) {
+      // the household's fetcher explains itself in plain text ("That site answered 403")
+      const why = await res.text().then(t => t.trim().slice(0, 120)).catch(() => '');
+      throw new Error(why && !/^</.test(why) ? why : `HTTP ${res.status}`);
+    }
     return res;
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error('took too long to answer');
+    if (err instanceof TypeError) throw new Error('couldn’t be reached');
+    throw err;
   } finally { clearTimeout(timer); }
 }
 
@@ -47,17 +55,32 @@ export async function testRelay(base) {
   return true;
 }
 
-/** Fetch through each route in turn; `accept` decides whether a response is usable. */
+/**
+ * Fetch through each route in turn; `accept` decides whether a response is usable.
+ * Throws an error whose `.notFound` is true if a page was fetched but had no recipe,
+ * and whose `.own` holds why the household's own fetcher failed (if it was tried).
+ */
 async function fetchAny(url, read, accept, relay) {
-  let lastErr;
-  for (const route of [...(relay ? [ownRoute(relay)] : []), u => u, ...RELAYS]) {
+  const routes = [
+    ...(relay ? [{ own: true, to: ownRoute(relay), ms: 25000 }] : []),
+    { to: u => u, ms: 8000 },
+    ...RELAYS.map(to => ({ to, ms: 10000 })),
+  ];
+  let notFound = false, own = '';
+  for (const r of routes) {
     try {
-      const out = await read(await fetchWithTimeout(route(url)));
+      const out = await read(await fetchWithTimeout(r.to(url), r.ms));
       if (accept(out)) return out;
-      lastErr = new Error('no recipe found');
-    } catch (err) { lastErr = err; }
+      // Our fetcher got the real page and it has no recipe: trust that and stop.
+      // From a public service it may just be a "you're blocked" page, so keep trying.
+      if (r.own) { notFound = true; break; }
+      if (!own) notFound = true;
+    } catch (err) { if (r.own) own = err.message; }
   }
-  throw lastErr;
+  const err = new Error(notFound ? 'no recipe found' : 'unreachable');
+  err.notFound = notFound;
+  err.own = own;
+  throw err;
 }
 
 /* ---------- reading schema.org Recipe data ---------- */
@@ -201,9 +224,11 @@ export async function importRecipe(url, onStatus = () => {}, { relay = '' } = {}
   try {
     recipe = await fetchAny(u.href, res => res.text().then(h => parseRecipeHtml(h, u.href)), r => !!r, relay);
   } catch (err) {
-    throw new Error(err.message === 'no recipe found'
-      ? 'Couldn’t find a recipe on that page. Check it’s the recipe itself, not a list of recipes.'
-      : 'Couldn’t reach that page. Check you’re online and the address is right, then try again.');
+    if (err.notFound) throw new Error('Couldn’t find a recipe on that page. Check it’s the recipe itself, not a list of recipes.');
+    if (err.own) throw new Error(`Couldn’t get that page. Your recipe fetcher said: “${err.own}”. Check the address is right and try again.`);
+    throw new Error(relay
+      ? 'Couldn’t get that page. Check you’re online and the address is right, then try again.'
+      : 'Couldn’t get that page – the free public services it uses are down or blocked. Setting up your own recipe fetcher (Settings → Recipes from websites) fixes this.');
   }
   recipe.photo = '';
   if (recipe.image) {
