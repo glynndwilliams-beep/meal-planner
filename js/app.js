@@ -758,11 +758,22 @@ function openEditor(id, { onSaved } = {}) {
     </div>`);
 
   const drawPhoto = () => {
-    $('#photo-wrap', body).innerHTML = photo
-      ? `<img class="hero" src="${photo}" alt="Recipe photo" style="margin-bottom:4px"><button class="link-btn" data-act="remove-photo">Remove photo</button>`
-      : '';
+    $('#photo-wrap', body).innerHTML = `
+      ${photo ? `<img class="hero" src="${photo}" alt="Recipe photo" style="margin-bottom:4px">` : ''}
+      <div class="scan-buttons">
+        <label class="btn file-btn">📸 ${photo ? 'New photo of dish' : 'Photo of the dish'}<input type="file" accept="image/*" capture="environment" data-dish></label>
+        <label class="btn file-btn">🖼️ ${photo ? 'Pick another' : 'Pick from photos'}<input type="file" accept="image/*" data-dish></label>
+      </div>
+      ${photo ? '<button class="link-btn" data-act="remove-photo">Remove photo</button>' : ''}`;
   };
   drawPhoto();
+  body.addEventListener('change', async e => {
+    const input = e.target.closest('[data-dish]');
+    if (!input || !input.files[0]) return;
+    const file = input.files[0];
+    input.value = '';
+    try { photo = await makeThumbnail(file); drawPhoto(); } catch (err) { console.error(err); toast('Couldn’t use that photo'); }
+  });
 
   const status = $('#scan-status', body), msg = $('#scan-msg', body), bar = $('#scan-bar', body);
   const field = s => $(s, body);
