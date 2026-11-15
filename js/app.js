@@ -8,6 +8,7 @@ import {
 } from './ingredients.js';
 import { scanRecipe, makeThumbnail } from './scan.js';
 import { mountCropper } from './crop.js';
+import { importRecipe, findUrl } from './web.js';
 
 const APP_VERSION = '1.1.0';
 
@@ -290,7 +291,7 @@ function recipeListHtml() {
 function renderRecipes() {
   setTop('Recipes', '<button class="btn small primary" data-action="new-recipe">+ New</button>');
   if (!state.recipes.size) {
-    view.innerHTML = `<div class="empty"><span class="big">📖</span>No recipes yet.<br>Scan one from a cookbook or magazine with your camera.
+    view.innerHTML = `<div class="empty"><span class="big">📖</span>No recipes yet.<br>Add one from a website, or scan one from a cookbook or magazine with your camera.
       <div style="margin-top:16px"><button class="btn primary" data-action="new-recipe">📷 Add your first recipe</button></div></div>`;
     return;
   }
@@ -728,7 +729,12 @@ function openEditor(id, { onSaved } = {}) {
   const { body } = openSheet(r ? 'Edit recipe' : 'New recipe', `
     <div class="stack">
       <div class="card" style="margin:0"><div class="card-body stack">
-        <div class="small muted">Photograph the recipe in good light with the phone flat above the page, then box in just the text. You can scan several parts – each is added below for you to check.</div>
+        <div class="small muted">Copy a recipe’s web address (e.g. from BBC Food) and paste it here:</div>
+        <div class="row"><input type="url" id="ed-url" class="grow" inputmode="url" autocapitalize="off" autocorrect="off" placeholder="https://www.bbc.co.uk/food/recipes/…"><button type="button" class="btn primary" data-act="import-url">Get recipe</button></div>
+        <div class="small" id="url-msg" hidden></div>
+      </div></div>
+      <div class="card" style="margin:0"><div class="card-body stack">
+        <div class="small muted">Or photograph the recipe in good light with the phone flat above the page, then box in just the text. You can scan several parts – each is added below for you to check.</div>
         <div class="scan-buttons">
           <label class="btn primary file-btn">📷 Take photo<input type="file" accept="image/*" capture="environment" data-scan></label>
           <label class="btn file-btn">🖼️ From photos<input type="file" accept="image/*" data-scan></label>
@@ -834,8 +840,36 @@ function openEditor(id, { onSaved } = {}) {
     if (act === 'cancel-crop') closeCrop();
   });
 
+  // Import from a web page: fills empty fields, adds to ingredients/method if already filled
+  const urlMsg = $('#url-msg', body);
+  const importUrl = async () => {
+    const btn = $('[data-act="import-url"]', body);
+    const url = findUrl(field('#ed-url').value);
+    urlMsg.hidden = false;
+    if (!url) { urlMsg.textContent = 'Paste the recipe’s web address first.'; return; }
+    btn.disabled = true;
+    try {
+      const rec = await importRecipe(url, m => { urlMsg.textContent = m; });
+      if (rec.title && !field('#ed-title').value.trim()) field('#ed-title').value = rec.title;
+      if (rec.serves && !field('#ed-serves').value.trim()) field('#ed-serves').value = rec.serves;
+      if (rec.ingredients.length) append('#ed-ings', rec.ingredients.join('\n'), '\n');
+      if (rec.method) append('#ed-method', rec.method, '\n\n');
+      if (!field('#ed-source').value.trim()) field('#ed-source').value = rec.source;
+      if (!r) body.querySelectorAll('#ed-meals input').forEach(i => { i.checked = rec.meals.includes(i.value); });
+      if (rec.photo && !photo) { photo = rec.photo; drawPhoto(); }
+      field('#ed-url').value = '';
+      const n = rec.ingredients.length;
+      urlMsg.textContent = `Got “${rec.title}”: ${n} ingredient${n === 1 ? '' : 's'}${rec.method ? ' and the method' : ''}. Check it below, then Save.`;
+    } catch (err) {
+      console.error(err);
+      urlMsg.textContent = err.message || String(err);
+    } finally { btn.disabled = false; }
+  };
+  field('#ed-url').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); importUrl(); } });
+
   body.addEventListener('click', async e => {
     const act = e.target.closest('[data-act]')?.dataset.act;
+    if (act === 'import-url') importUrl();
     if (act === 'remove-photo') { photo = ''; drawPhoto(); }
     if (act === 'save') {
       const title = field('#ed-title').value.trim();

@@ -71,6 +71,7 @@ At this point the app works on one phone. Do step 2 to share it with your househ
 | Change which days/meals appear | **Settings** → tick or untick in *Meals to plan* |
 | See other weeks | **‹ ›** arrows at the top of the Plan |
 | Scan a recipe | **Recipes** → **+ New** → **📷 Take photo**. Scan extra pages the same way; each is added below. Check the text, fix any mistakes, then **Save**. |
+| Add a recipe from a website | In Safari on the recipe page tap **Share → Copy**. Then **Recipes** → **+ New** → paste into the box at the top → **Get recipe**. Check it, then **Save**. Works with BBC Food, BBC Good Food and most recipe sites. |
 | Shop for a recipe | Tap the recipe on the plan → tick the ingredients you **need** → **Add to shopping list** ("On list" shows what's already there) |
 | Shop | **Shopping** tab → tick items as you put them in the trolley → **Clear ticked** when done |
 | Add something by hand | Type it in the box at the top of Shopping, e.g. `2 lemons` |
