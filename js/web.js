@@ -217,32 +217,51 @@ export function parseRecipeHtml(html, pageUrl) {
 
 /**
  * The iPhone Shortcut can read the recipe straight off the page open in Safari (see
- * PAGE_SCRIPT) and hand it over as { u: page address, s: site name, l: [recipe JSON-LD], m: microdata HTML }.
- * Nothing needs fetching then, so it works even on sites that block fetchers (e.g. BBC).
+ * PAGE_SCRIPT) and hand it over, so nothing needs fetching – it works even on sites that
+ * block fetchers (e.g. BBC). Page data: { u: page address, s: site name, r: slim recipe
+ * object }. Older versions of the script sent l: [recipe JSON-LD] and m: microdata HTML.
  */
 export function parsePageData(page) {
   if (!page || typeof page.u !== 'string') return null;
   try { new URL(page.u); } catch { return null; }
   const attr = s => String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  const blocks = [...(page.r ? [JSON.stringify(page.r)] : []), ...(Array.isArray(page.l) ? page.l : [])];
   const html = `<meta property="og:site_name" content="${attr(page.s)}">`
-    + (Array.isArray(page.l) ? page.l : []).map(t => `<script type="application/ld+json">${String(t).replace(/<\/script/gi, '<\\/script')}</script>`).join('')
+    + blocks.map(t => `<script type="application/ld+json">${String(t).replace(/<\/script/gi, '<\\/script')}</script>`).join('')
     + (typeof page.m === 'string' ? page.m : '');
   return parseRecipeHtml(html, page.u);
 }
 
-/** What the iPhone Shortcut's "Run JavaScript on Web Page" action runs (pasted in by the user). */
-export const PAGE_SCRIPT = `var l=[],drop={review:1,reviews:1,video:1,comment:1,aggregateRating:1,interactionStatistic:1};
-function trim(o){if(Array.isArray(o))return o.map(trim);if(o&&typeof o=='object'){for(var k in o){if(drop[k])delete o[k];else o[k]=trim(o[k]);}}return o;}
-document.querySelectorAll('script[type="application/ld+json"]').forEach(function(s){if(/Recipe/.test(s.textContent)){try{l.push(JSON.stringify(trim(JSON.parse(s.textContent))));}catch(e){l.push(s.textContent);}}});
-var md=l.length?'':((document.querySelector('[itemtype*="schema.org/Recipe"]')||{}).outerHTML||'').slice(0,60000);
+/**
+ * What the iPhone Shortcut's "Run JavaScript on Web Page" action runs (pasted in by the user).
+ * It keeps only what the app uses (no reviews, nutrition, videos…) and packs it as
+ * MPR1.<base64url>, which is compact and made only of characters that Shortcuts' URL Encode
+ * leaves alone – so the link can't double in size or be cut short.
+ */
+export const PAGE_SCRIPT = `function isR(o){var t=o&&o['@type'];return t=='Recipe'||(Array.isArray(t)&&t.indexOf('Recipe')>=0);}
+function find(o,d){if(!o||typeof o!='object'||d>6)return null;if(Array.isArray(o)){for(var i=0;i<o.length;i++){var a=find(o[i],d+1);if(a)return a;}return null;}if(isR(o))return o;var ks=['@graph','mainEntity','mainEntityOfPage','itemListElement','item'];for(var j=0;j<ks.length;j++){var b=find(o[ks[j]],d+1);if(b)return b;}return null;}
+function steps(v){if(v==null)return v;if(typeof v=='string')return v;if(Array.isArray(v))return v.map(steps);var t=String(v['@type']||'');if(/Section/.test(t))return{'@type':'HowToSection',name:v.name,itemListElement:steps(v.itemListElement)};if(v.itemListElement)return steps(v.itemListElement);return v.text||v.description||v.name||'';}
+function pic(v){if(Array.isArray(v))v=v[0];return v&&typeof v=='object'?(v.url||v.contentUrl||''):(v||'');}
+function names(v){return(Array.isArray(v)?v:[v]).map(function(a){return a&&typeof a=='object'?a.name:a;}).filter(Boolean);}
+var rec=null;document.querySelectorAll('script[type="application/ld+json"]').forEach(function(s){if(!rec){try{rec=find(JSON.parse(s.textContent),0);}catch(e){}}});
+var r=null;if(rec){r={'@type':'Recipe',name:rec.name||rec.headline,recipeYield:rec.recipeYield||rec.yield,recipeIngredient:rec.recipeIngredient||rec.ingredients,recipeInstructions:steps(rec.recipeInstructions),image:pic(rec.image),recipeCategory:rec.recipeCategory,recipeCuisine:rec.recipeCuisine,keywords:rec.keywords,author:names(rec.author)};}
+else{var sc=document.querySelector('[itemtype*="schema.org/Recipe"]');if(sc){var g=function(p){return Array.prototype.map.call(sc.querySelectorAll('[itemprop="'+p+'"]'),function(e){return(e.getAttribute('content')||e.getAttribute('src')||e.textContent||'').trim();});};r={'@type':'Recipe',name:g('name')[0],recipeYield:g('recipeYield')[0],recipeIngredient:g('recipeIngredient').length?g('recipeIngredient'):g('ingredients'),recipeInstructions:g('recipeInstructions'),image:g('image')[0]};}}
 var sn=document.querySelector('meta[property="og:site_name"]');
-completion('MPRECIPE:'+encodeURIComponent(JSON.stringify({u:location.href,s:sn?sn.content:'',l:l,m:md})));`;
-// The MPRECIPE: label keeps Shortcuts from turning the result into a "Dictionary" and changing it,
-// and encoding it here means characters Shortcuts' URL Encode leaves alone (like &) can't break the link.
+var j=JSON.stringify({u:location.href,s:sn?sn.content:'',r:r});
+completion('MPR1.'+btoa(unescape(encodeURIComponent(j))).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,''));`;
 
-/** Turn whatever arrived after ?import= back into page data, or null. Copes with being encoded once or twice. */
+/** Turn whatever arrived after ?import= back into page data, or null. Copes with every version of the script. */
 export function readImportParam(raw) {
   let t = String(raw || '').trim();
+  const pack = t.match(/^MPR1(?:\.|%2E)([A-Za-z0-9_-]+)/i);
+  if (pack) {
+    try {
+      const b64 = pack[1].replace(/-/g, '+').replace(/_/g, '/');
+      const bytes = Uint8Array.from(atob(b64 + '==='.slice((b64.length + 3) % 4)), c => c.charCodeAt(0));
+      const p = JSON.parse(new TextDecoder().decode(bytes));
+      return p && typeof p.u === 'string' ? p : null;
+    } catch { return null; }
+  }
   for (let i = 0; i < 3; i++) {
     t = t.replace(/^MPRECIPE(:|%3A)\s*/i, '');
     if (t.startsWith('{')) break;

@@ -12,7 +12,7 @@ import { mountCropper } from './crop.js';
 import { importRecipe, findUrl, testRelay, PAGE_SCRIPT, readImportParam } from './web.js';
 import { setupTrips, myTrips, currentTripCode } from './trip.js';
 
-const APP_VERSION = '1.6.2';
+const APP_VERSION = '1.6.3';
 
 const DAYS = [
   { key: 'mon', label: 'Monday' },
