@@ -72,7 +72,13 @@ At this point the app works on one phone. Do step 2 to share it with your househ
 | See other weeks | **‹ ›** arrows at the top of the Plan |
 | Scan a recipe | **Recipes** → **+ New** → **📷 Take photo**. Scan extra pages the same way; each is added below. Check the text, fix any mistakes, then **Save**. |
 | Add a recipe from a website | In Safari on the recipe page tap **Share → Copy**. Then **Recipes** → **+ New** → paste into the box at the top → **Get recipe**. Check it, then **Save**. Works with BBC Food, BBC Good Food and most recipe sites. |
+| Cook from a recipe | Open it → **👩‍🍳 Start cooking**. Big steps, one at a time; the screen stays on. Tap a step to tick it off. At the end, rate it and add a note. |
+| Cook for more or fewer people | **Settings → Cooking for** sets your usual number. On a recipe, **− / +** next to *Serves* changes it for that recipe; amounts and the shopping list follow. |
+| Rate a recipe or add a note | Tap the stars on a recipe, or **✏️ Add a note**. **★ Favourites** on the Recipes tab shows 4–5 star recipes, and Suggest picks favourites more often. |
+| Find a recipe | **Recipes** → type in the search box (name, ingredient or tag), or tap a tag under it. Add tags when editing a recipe; web recipes come with some. |
 | Shop for a recipe | Tap the recipe on the plan → tick the ingredients you **need** → **Add to shopping list** ("On list" shows what's already there) |
+| Shop for the whole week | **Shopping** → **📅 Add ingredients for planned meals**. Same items are added together. Untick anything you have, then **Add**. |
+| Stop adding things you always have | **Settings → Always in the cupboard** (salt, oil…), or tap an item on the Shopping list → **We always have this**. |
 | Shop | **Shopping** tab → tick items as you put them in the trolley → **Clear ticked** when done |
 | Add something by hand | Type it in the box at the top of Shopping, e.g. `2 lemons` |
 | Change an item's shop section or amount | Tap the item name on the Shopping list |

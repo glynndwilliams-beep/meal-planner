@@ -126,6 +126,16 @@ function guessMeals(r) {
   return meals;
 }
 
+/** A short list of tags from the site's category, cuisine and keywords. */
+function tagsFrom(r) {
+  const authors = new Set(arr(r.author).map(a => text(typeof a === 'string' ? a : a && a.name).toLowerCase()).filter(Boolean));
+  const raw = [r.recipeCategory, r.recipeCuisine, r.keywords].flat()
+    .flatMap(x => text(x).split(/[,;|]/))
+    .map(t => t.trim().toLowerCase().replace(/\s+recipes?$/, ''))
+    .filter(t => t && t.length <= 20 && !authors.has(t) && !/^\d|^recipe|^(new|easy recipes?|popular)$/.test(t));
+  return [...new Set(raw)].slice(0, 8);
+}
+
 /** Microdata fallback for older sites that mark up the page itself instead of using JSON. */
 function fromMicrodata(doc) {
   const scope = doc.querySelector('[itemtype*="schema.org/Recipe" i]');
@@ -161,12 +171,13 @@ export function parseRecipeHtml(html, pageUrl) {
     ingredients,
     method: method.join('\n\n'),
     meals: guessMeals(node),
+    tags: tagsFrom(node),
     image: imageUrl(node.image, pageUrl),
     source: `${text(site) || host} – ${pageUrl}`,
   };
 }
 
-/** Fetch a recipe page and return { title, serves, ingredients, method, meals, photo, source }. */
+/** Fetch a recipe page and return { title, serves, ingredients, method, meals, tags, photo, source }. */
 export async function importRecipe(url, onStatus = () => {}) {
   let u;
   try { u = new URL(url); } catch { throw new Error('That doesn’t look like a web address'); }

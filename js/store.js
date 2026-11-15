@@ -3,8 +3,8 @@
 //   FirebaseStore - shared household data in Cloud Firestore, live-synced between phones.
 //
 // Data is organised as collections of documents:
-//   meta/settings      { days: { mon: { breakfast, lunch, dinner }, ... } }
-//   recipes/{id}       { title, serves, ingredients: [string], method, source, photo, createdAt }
+//   meta/settings      { days: { mon: { breakfast, lunch, dinner }, ... }, pantry: [string], people: number|null }
+//   recipes/{id}       { title, serves, ingredients: [string], method, source, photo, tags: [string], rating: 0-5, notes, createdAt }
 //   plans/{weekKey}    { slots: { "mon_dinner": [ { id, type: 'recipe', recipeId } | { id, type: 'text', text } ] } }
 //   shopping/{id}      { name, key, amounts, section, checked, sources: [string], createdAt }
 

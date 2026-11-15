@@ -94,8 +94,11 @@ export function cleanLine(line) {
 /**
  * Parse "200g plain flour, sifted" -> { qty: 200, unit: 'g', name: 'plain flour', note: 'sifted', raw }
  */
+// "600g/1lb 5oz pork" -> keep "600g" and drop the imperial alternative after the slash
+const METRIC_IMPERIAL = /^([\d.,½⅓⅔¼¾⅕⅛⅜⅝⅞]+\s*(?:g|kg|ml|l))\s*\/\s*[\d.,½⅓⅔¼¾⅕⅛⅜⅝⅞]+\s*(?:fl\s*oz|oz|lb|pints?)\b(?:\s+[\d.,½⅓⅔¼¾⅕⅛⅜⅝⅞]+\s*(?:fl\s*)?oz\b)?/i;
+
 export function parseIngredient(raw) {
-  const line = cleanLine(raw);
+  const line = cleanLine(raw).replace(METRIC_IMPERIAL, '$1');
   // "2 x 400g tins chopped tomatoes" -> 2 tin, "chopped tomatoes" (400g kept as a note)
   const multi = line.match(/^(\d+)\s*x\s*(\d+(?:[.,]\d+)?\s*(?:g|kg|ml|l)\b)\s*(tins?|cans?|packs?|packets?|jars?|bags?|bottles?)?\s*(?:of\s+)?(.+)$/i);
   if (multi) {
@@ -152,7 +155,7 @@ export function displayName(name) {
 function fmtNum(n) {
   if (Number.isInteger(n)) return String(n);
   const whole = Math.floor(n), frac = n - whole;
-  const named = [[.25, '¼'], [.5, '½'], [.75, '¾'], [1 / 3, '⅓'], [2 / 3, '⅔']].find(([v]) => Math.abs(v - frac) < .02);
+  const named = [[.125, '⅛'], [.25, '¼'], [.5, '½'], [.75, '¾'], [1 / 3, '⅓'], [2 / 3, '⅔']].find(([v]) => Math.abs(v - frac) < .02);
   if (named) return (whole || '') + named[1];
   return String(Math.round(n * 100) / 100);
 }
@@ -189,4 +192,61 @@ export function addAmount(amounts, qty, unit) {
     if (a.unit === 'ml' && a.qty >= 1000) { a.qty = a.qty / 1000; a.unit = 'l'; }
   }
   return list;
+}
+
+/* ---------- scaling for a different number of people ---------- */
+
+/** A friendly number for a scaled amount: whole grams, quarters for spoons and items. */
+function niceNum(n) {
+  if (n >= 100) return String(Math.round(n / 5) * 5);
+  if (n >= 10) return String(Math.round(n));
+  if (n < 0.2) return '⅛';
+  const q = Math.round(n * 4) / 4;
+  if (Math.abs(n - q) < 0.09) return fmtNum(q);
+  const third = [1 / 3, 2 / 3].find(t => Math.abs((n % 1) - t) < 0.05);
+  return third ? fmtNum(Math.floor(n) + third) : String(Math.round(n * 10) / 10);
+}
+
+/**
+ * Multiply the amounts at the start of an ingredient line, e.g. scaleLine("600g/1lb 5oz pork", 0.5)
+ * -> "300g/10½oz pork". Numbers inside the name, or the size after "2 x", are left alone.
+ */
+export function scaleLine(line, factor) {
+  if (!factor || Math.abs(factor - 1) < 1e-6) return line;
+  const fr = Object.keys(FRACTIONS).join('');
+  const num = new RegExp(`^(?:\\d+(?:[.,]\\d+)?(?:\\s*[${fr}])?(?:\\s+\\d+\\/\\d+)?|\\d+\\/\\d+|[${fr}])`);
+  let out = '', rest = line, skipNext = false, sawNumber = false;
+  for (let guard = 0; guard < 30 && rest; guard++) {
+    const sp = rest.match(/^[\s/–-]+/);
+    if (sp) { out += sp[0]; rest = rest.slice(sp[0].length); continue; }
+    const n = rest.match(num);
+    if (n) {
+      const v = toNumber(n[0].replace(/(\d)([½⅓⅔¼¾⅕⅛⅜⅝⅞])/, '$1 $2'));
+      out += v == null || skipNext ? n[0] : niceNum(v * factor);
+      skipNext = false; sawNumber = true;
+      rest = rest.slice(n[0].length);
+      continue;
+    }
+    const w = rest.match(/^([a-zA-Z]+)\.?/);
+    if (w && sawNumber && (UNITS[w[1].toLowerCase()] || /^(x|to)$/i.test(w[1]))) {
+      if (/^x$/i.test(w[1])) skipNext = true;
+      out += w[0]; rest = rest.slice(w[0].length);
+      continue;
+    }
+    break;
+  }
+  return out + rest;
+}
+
+/** First whole number in "Serves 4-6" / "4 people" -> 4, or null. */
+export function servesNumber(serves) {
+  const m = String(serves || '').match(/\d+/);
+  return m ? Number(m[0]) : null;
+}
+
+/** Is this ingredient something kept in the cupboard? `pantry` is a list of names. */
+export function inPantry(line, pantry) {
+  if (!pantry || !pantry.length) return false;
+  const key = ` ${ingredientKey(parseIngredient(line).name)} `;
+  return pantry.some(p => { const k = ingredientKey(p); return k && key.includes(` ${k} `); });
 }
