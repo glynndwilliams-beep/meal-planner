@@ -10,8 +10,9 @@ import {
 import { scanRecipe, makeThumbnail } from './scan.js';
 import { mountCropper } from './crop.js';
 import { importRecipe, findUrl } from './web.js';
+import { setupTrips, myTrips, currentTripCode } from './trip.js';
 
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.3.0';
 
 const DAYS = [
   { key: 'mon', label: 'Monday' },
@@ -47,6 +48,9 @@ const state = {
   settings: { days: DEFAULT_DAYS, pantry: [], people: null },
   servings: new Map(), // recipeId -> people chosen on this phone
   recipeTag: '',
+  mode: 'home',          // 'home' (household) or 'trip'
+  householdTrips: {},    // trips this household organises: { code: { name, start, end, key } }
+  trip: null,
   recipes: new Map(),
   plans: new Map(),
   shopping: [],
@@ -211,13 +215,15 @@ function connect(store) {
     store.subscribe('meta', docs => {
       const s = docs.find(d => d.id === 'settings');
       state.settings = { days: mergeDays(s && s.days), pantry: (s && s.pantry) || [], people: (s && s.people) || null };
+      const tr = docs.find(d => d.id === 'trips');
+      state.householdTrips = (tr && tr.list) || {};
       done('meta');
     }, onErr),
     store.subscribe('recipes', docs => { state.recipes = new Map(docs.map(d => [d.id, d])); done('recipes'); }, onErr),
     store.subscribe('plans', docs => { state.plans = new Map(docs.map(d => [d.id, d])); done('plans'); }, onErr),
     store.subscribe('shopping', docs => { state.shopping = docs; done('shopping'); }, onErr),
   );
-  $('.tabbar').hidden = false;
+  if (state.mode !== 'trip') setTabbar();
 }
 
 let rafId = 0;
@@ -229,8 +235,22 @@ function scheduleRender() {
   });
 }
 
+/* The tab bar changes between the household and a trip. */
+const TABS = {
+  home: [['plan', '📅', 'Plan'], ['recipes', '📖', 'Recipes'], ['shopping', '🛒', 'Shopping'], ['history', '📊', 'History'], ['settings', '⚙️', 'Settings']],
+  trip: [['tplan', '🏕️', 'Trip plan'], ['tshop', '🛒', 'Shopping'], ['tinfo', '👪', 'Trip']],
+};
+function setTabbar() {
+  const tabs = TABS[state.mode === 'trip' ? 'trip' : 'home'];
+  const bar = $('.tabbar');
+  bar.style.gridTemplateColumns = `repeat(${tabs.length}, 1fr)`;
+  bar.innerHTML = tabs.map(([t, ico, label]) => `<button data-tab="${t}" class="${state.tab === t ? 'active' : ''}"><span class="ico" aria-hidden="true">${ico}</span>${label}${/shop/.test(t) ? '<span class="badge" id="shop-badge" hidden></span>' : ''}</button>`).join('');
+  bar.hidden = false;
+}
+
 /* ---------------- rendering ---------------- */
 function render() {
+  if (state.mode === 'trip') { trips.render(); return; }
   if (!state.store) return;
   document.querySelectorAll('.tabbar button').forEach(b => b.classList.toggle('active', b.dataset.tab === state.tab));
   const left = state.shopping.filter(i => !i.checked).length;
@@ -281,6 +301,7 @@ function renderPlan() {
     <button class="icon-btn" data-action="week" data-dir="-1" aria-label="Previous week">‹</button>
     <div class="label">${weekName(state.week)}<small>${fmtDay(state.week)} – ${fmtDay(addDays(state.week, 6))}</small></div>
     <button class="icon-btn" data-action="week" data-dir="1" aria-label="Next week">›</button></div>`;
+  html += trips.planBannerHtml(state.week);
   let any = false;
   DAYS.forEach((d, i) => {
     const meals = MEALS.filter(m => state.settings.days[d.key][m]);
@@ -619,6 +640,8 @@ function renderSettings() {
   }
   html += '</div></div>';
 
+  html += trips.settingsHtml();
+
   if (isIOS && !isStandalone()) {
     html += `<div class="section-title">Install</div><div class="card"><div class="card-body small">
       To put Meal Planner on your Home Screen: in Safari tap the <b>Share</b> button (square with an arrow), scroll down and tap <b>Add to Home Screen</b>.</div></div>`;
@@ -695,7 +718,7 @@ function methodHtml(text) {
 }
 
 /** lines: strings (all for `source`) or { line, source } from several recipes; same items are combined. */
-async function addToShopping(lines, source) {
+async function addToShopping(lines, source, { store = state.store, items = state.shopping, extra = {} } = {}) {
   const pending = new Map();
   for (const entry of lines) {
     const raw = typeof entry === 'string' ? entry : entry.line;
@@ -704,10 +727,10 @@ async function addToShopping(lines, source) {
     const key = ingredientKey(p.name) || p.name.toLowerCase();
     let item = pending.get(key);
     if (!item) {
-      const ex = state.shopping.find(i => !i.checked && i.key === key);
+      const ex = items.find(i => !i.checked && i.key === key);
       item = ex
         ? { ...ex, amounts: [...(ex.amounts || [])], sources: [...(ex.sources || [])] }
-        : { id: newId(), name: displayName(p.name), key, amounts: [], qtyText: '', section: guessSection(p.unit === 'tin' ? `tin ${p.name}` : p.name), checked: false, sources: [], createdAt: Date.now() };
+        : { id: newId(), name: displayName(p.name), key, amounts: [], qtyText: '', section: guessSection(p.unit === 'tin' ? `tin ${p.name}` : p.name), checked: false, sources: [], createdAt: Date.now(), ...extra };
       pending.set(key, item);
     }
     if (item.qtyText) {
@@ -718,7 +741,7 @@ async function addToShopping(lines, source) {
     }
     if (src && !item.sources.includes(src)) item.sources.push(src);
   }
-  await state.store.batch([...pending.values()].map(({ id, ...val }) => ({ op: 'set', col: 'shopping', id, val })));
+  await store.batch([...pending.values()].map(({ id, ...val }) => ({ op: 'set', col: 'shopping', id, val })));
   return pending.size;
 }
 
@@ -1356,9 +1379,11 @@ function renderWelcome(message = '') {
     <p class="muted">Share one meal plan, recipe book and shopping list with everyone at home.</p>
     <div class="card"><div class="card-body stack"><b>Setting up for the first time?</b>
       <button class="btn primary block" data-action="create-household">Create a household</button></div></div>
-    <div class="card"><div class="card-body stack"><b>Someone already set it up?</b>
-      <form id="join-form" class="stack"><input type="text" id="join-code" placeholder="Household code, e.g. PLUM-RIVER-4821" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false">
-      <button class="btn block" type="submit">Join household</button></form></div></div>
+    <div class="card"><div class="card-body stack"><b>Someone sent you a code?</b>
+      <form id="join-form" class="stack"><input type="text" id="join-code" placeholder="e.g. PLUM-RIVER-4821 or TRIP-…" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false">
+      <button class="btn block" type="submit">Join household or trip</button></form>
+      <p class="small muted" style="margin:0">Invited on a family trip? Enter the TRIP code – you don’t need to set up a household.</p></div></div>
+    ${trips.allTrips().length ? `<div class="card" style="text-align:left"><div class="card-head"><h3>Your trips</h3></div>${trips.tripsListHtml()}</div>` : ''}
     <p class="small" id="welcome-msg" style="color:var(--danger)">${esc(message)}</p></div>`;
 }
 
@@ -1384,6 +1409,14 @@ async function welcomeAction(fn) {
   }
 }
 
+/* ---------------- trips ---------------- */
+const trips = setupTrips({
+  state, $, esc, toast, setTop, openSheet, closeSheet, methodHtml, shareText, ymd, fromYmd, addDays, MEALS, MEAL_LABEL,
+  firebaseConfig, addToShopping, scheduleRender, setTabbar, renderWelcome,
+  get view() { return view; },
+  render: () => render(),
+});
+
 /* ---------------- event wiring ---------------- */
 document.addEventListener('click', async e => {
   const tabBtn = e.target.closest('.tabbar button');
@@ -1397,6 +1430,7 @@ document.addEventListener('click', async e => {
 
   const el = e.target.closest('[data-action]');
   if (!el || el.closest('#sheet')) return;
+  if (await trips.onAction(el)) return;
   const week = ymd(state.week);
   switch (el.dataset.action) {
     case 'week': state.week = addDays(state.week, 7 * Number(el.dataset.dir)); render(); break;
@@ -1476,6 +1510,7 @@ document.addEventListener('input', e => {
 });
 
 document.addEventListener('submit', async e => {
+  if (await trips.onSubmit(e)) return;
   if (e.target.id === 'shop-add') {
     e.preventDefault();
     const text = state.shopDraft.trim();
@@ -1496,6 +1531,12 @@ document.addEventListener('submit', async e => {
     e.preventDefault();
     const code = normaliseCode($('#join-code').value);
     if (!code) return;
+    if (code.startsWith('TRIP-')) {
+      welcomeAction(async () => {
+        try { await trips.join(code); } catch (err) { renderWelcome(err.message); }
+      });
+      return;
+    }
     welcomeAction(async () => {
       if (!(await householdExists(firebaseConfig, code))) {
         renderWelcome(`No household found with the code ${code}. Check the spelling and try again.`);
@@ -1514,13 +1555,25 @@ async function boot() {
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
     navigator.serviceWorker.register('sw.js').catch(err => console.warn('Service worker failed', err));
   }
-  if (!firebaseConfig) { connect(new LocalStore()); return; }
+  const resumeTrip = currentTripCode();
+  if (!firebaseConfig) {
+    connect(new LocalStore());
+    if (resumeTrip) trips.open(resumeTrip, { quiet: true });
+    return;
+  }
 
   const code = localStorage.getItem('mp-household');
-  if (!code) { renderWelcome(); return; }
+  if (!code) {
+    // A phone that only joined a trip goes straight to it
+    const only = resumeTrip || Object.keys(myTrips())[0];
+    if (only) { trips.open(only).catch(e => { console.error(e); renderWelcome(); }); return; }
+    renderWelcome();
+    return;
+  }
   view.innerHTML = '<p class="empty">Connecting to your household…</p>';
   try {
     await enterHousehold(code);
+    if (resumeTrip) await trips.open(resumeTrip, { quiet: true });
   } catch (e) {
     console.error(e);
     view.innerHTML = `<div class="empty"><span class="big">📡</span>Couldn’t connect to your household.<br>${esc(e.code || e.message)}

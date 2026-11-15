@@ -322,3 +322,11 @@ label.field > span { display: block; font-size: 14px; color: var(--muted); margi
 .cook-done .big { font-size: 64px; }
 .cook-nav { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; position: sticky; bottom: 0; padding-top: 8px; background: var(--bg); }
 .cook-nav .btn { min-height: 56px; font-size: 18px; }
+
+/* ---------- trips ---------- */
+.trip-banner { display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%; padding: 12px 14px; text-align: left; color: var(--text); background: var(--accent-soft); border-color: transparent; }
+.chip .cook-by { display: block; font-size: 12px; font-weight: 500; color: var(--muted); }
+.chip .chip-main { white-space: normal; }
+.claim { font-size: 12px; font-weight: 700; color: var(--muted); background: var(--surface-2); border-radius: 6px; padding: 2px 6px; white-space: nowrap; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
+.claim.mine { color: var(--accent); background: var(--accent-soft); }
+input[type=date] { width: 100%; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 10px 12px; font-size: 16px; color: var(--text); min-height: 44px; }

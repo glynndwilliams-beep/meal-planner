@@ -7,6 +7,14 @@
 //   recipes/{id}       { title, serves, ingredients: [string], method, source, photo, tags: [string], rating: 0-5, notes, createdAt }
 //   plans/{weekKey}    { slots: { "mon_dinner": [ { id, type: 'recipe', recipeId } | { id, type: 'text', text } ] } }
 //   shopping/{id}      { name, key, amounts, section, checked, sources: [string], createdAt }
+//   meta/trips         { list: { [tripCode]: { name, start, end, key } } }  (trips this household organises)
+//
+// Trips (shared with other families for a date range) live outside the household:
+//   trips/{code}                 { name, start, end, endsAt: Timestamp, meals: [..], createdAt }
+//   trips/{code}/private/owner   { key }   never readable; proves who the organisers are
+//   trips/{code}/organisers/{uid}{ key }   phones of the organising household
+//   trips/{code}/families|meals|recipes|shopping/{id}
+// The security rules (firestore.rules) only let other families in until endsAt.
 
 const FIREBASE_VERSION = '10.12.2';
 export const COLLECTIONS = ['meta', 'recipes', 'plans', 'shopping'];
@@ -23,7 +31,8 @@ function deepMerge(target, src) {
 
 /* ------------------------------------------------------------------ */
 export class LocalStore {
-  constructor(key = 'mp-local-data') {
+  constructor(key = 'mp-local-data', { root = null } = {}) {
+    this.root = root;
     this.kind = 'local';
     this.key = key;
     try { this.data = JSON.parse(localStorage.getItem(key) || '{}'); } catch { this.data = {}; }
@@ -56,6 +65,11 @@ export class LocalStore {
     this._save();
     touched.forEach(c => this._emit(c));
   }
+  // The trip's own document (name, dates): kept under a hidden collection locally.
+  subscribeRoot(cb) { return this.subscribe('_root', docs => cb(docs.find(d => d.id === 'doc') || null)); }
+  mergeRoot(val) { return this.merge('_root', 'doc', val); }
+  async registerOrganiser() { return true; }
+  async destroy() { localStorage.removeItem(this.key); this.data = {}; }
   dump() { return JSON.parse(JSON.stringify(this.data)); }
   hasData() { return ['recipes', 'plans', 'shopping'].some(c => Object.keys(this.data[c] || {}).length); }
 }
@@ -86,7 +100,7 @@ async function loadFirebase(config) {
     const stop = authMod.onAuthStateChanged(auth, u => { stop(); resolve(u); });
   });
   if (!user) await authMod.signInAnonymously(auth);
-  fb = { ...fsMod, db };
+  fb = { ...fsMod, db, auth };
   return fb;
 }
 
@@ -102,17 +116,46 @@ export async function createHousehold(config, code) {
 }
 
 export class FirebaseStore {
-  constructor(f, code) {
+  constructor(f, code, root = 'households') {
     this.kind = 'firebase';
     this.f = f;
     this.code = code;
+    this.root = root;
   }
-  static async open(config, code) {
+  static async open(config, code, root = 'households') {
     const f = await loadFirebase(config);
-    return new FirebaseStore(f, code);
+    return new FirebaseStore(f, code, root);
   }
-  _col(col) { return this.f.collection(this.f.db, 'households', this.code, col); }
-  _doc(col, id) { return this.f.doc(this.f.db, 'households', this.code, col, id); }
+  _col(col) { return this.f.collection(this.f.db, this.root, this.code, col); }
+  _doc(col, id) { return this.f.doc(this.f.db, this.root, this.code, col, id); }
+  _rootRef() { return this.f.doc(this.f.db, this.root, this.code); }
+  subscribeRoot(cb, onError) {
+    return this.f.onSnapshot(this._rootRef(),
+      snap => cb(snap.exists() ? fromFirestore({ id: snap.id, ...snap.data() }) : null),
+      err => { console.error(err); onError && onError(err); });
+  }
+  mergeRoot(val) { return this.f.setDoc(this._rootRef(), toFirestore(this.f, val), { merge: true }); }
+  /** Prove this phone belongs to the organising household (needs the secret key from meta/trips). */
+  async registerOrganiser(key) {
+    const uid = this.f.auth.currentUser && this.f.auth.currentUser.uid;
+    if (!uid || !key) return false;
+    try { await this.f.setDoc(this._doc('organisers', uid), { key, at: Date.now() }); return true; } catch (e) { console.warn(e); return false; }
+  }
+  /** Delete the whole trip (organisers only). */
+  async destroy() {
+    const ops = [];
+    for (const col of TRIP_COLLECTIONS) {
+      const snap = await this.f.getDocs(this._col(col));
+      snap.forEach(d => ops.push({ op: 'remove', col, id: d.id }));
+    }
+    await this.batch(ops);
+    const uid = this.f.auth.currentUser.uid;
+    const b = this.f.writeBatch(this.f.db);
+    b.delete(this._doc('private', 'owner'));
+    b.delete(this._rootRef());
+    b.delete(this._doc('organisers', uid));
+    await b.commit();
+  }
   subscribe(col, cb, onError) {
     return this.f.onSnapshot(this._col(col),
       snap => cb(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
@@ -134,6 +177,49 @@ export class FirebaseStore {
       await b.commit();
     }
   }
+}
+
+/* ------------------------------ trips ------------------------------ */
+export const TRIP_COLLECTIONS = ['families', 'meals', 'recipes', 'shopping'];
+
+// endsAt is a real Firestore timestamp so the security rules can compare it with the time.
+function toFirestore(f, val) {
+  const out = { ...val };
+  if (typeof out.endsAt === 'number') out.endsAt = f.Timestamp.fromMillis(out.endsAt);
+  return out;
+}
+function fromFirestore(doc) {
+  if (doc && doc.endsAt && typeof doc.endsAt.toMillis === 'function') doc.endsAt = doc.endsAt.toMillis();
+  return doc;
+}
+
+export function makeTripCode() {
+  const r = n => crypto.getRandomValues(new Uint32Array(1))[0] % n;
+  return `TRIP-${WORDS[r(WORDS.length)]}-${MORE[r(MORE.length)]}-${String(100000 + r(900000))}`;
+}
+/** 128-bit secret that only the organising household knows. */
+export function makeSecret() {
+  return [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Create the trip, its secret, and register this phone as an organiser, all in one go. */
+export async function createTrip(config, code, info, key) {
+  const f = await loadFirebase(config);
+  const uid = f.auth.currentUser.uid;
+  const b = f.writeBatch(f.db);
+  b.set(f.doc(f.db, 'trips', code), toFirestore(f, info));
+  b.set(f.doc(f.db, 'trips', code, 'private', 'owner'), { key });
+  b.set(f.doc(f.db, 'trips', code, 'organisers', uid), { key, at: Date.now() });
+  await b.commit();
+}
+
+/** 'open' | 'missing' (wrong code, or ended and locked) */
+export async function tripStatus(config, code) {
+  const f = await loadFirebase(config);
+  try {
+    const snap = await f.getDoc(f.doc(f.db, 'trips', code));
+    return snap.exists() ? 'open' : 'missing';
+  } catch { return 'missing'; } // permission denied = ended (or never existed)
 }
 
 /* ------------------------------------------------------------------ */

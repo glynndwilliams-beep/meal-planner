@@ -63,6 +63,26 @@ At this point the app works on one phone. Do step 2 to share it with your househ
 
 ---
 
+## Step 4 – Turn on trips with other families (once)
+
+Trips let you share a trip plan and shopping list with other families for set dates. The database itself keeps them out of your household and locks them out after the trip, so the security rules need updating once:
+
+1. Open <https://console.firebase.google.com> → your **meal-planner** project → **Build → Firestore Database** → **Rules** tab.
+2. Delete what's there, paste the whole of the new `firestore.rules` from this folder, and click **Publish**. (Your household keeps working exactly as before.)
+
+Until you do this, **Plan a trip** will say it couldn't create the trip.
+
+**Using a trip**
+- **Settings → 🏕️ Plan a trip**: name, dates, which meals, your family's name and how many of you.
+- Under the **Trip** tab, tap **Send the code to the other families**. They open the app's address, tap **Join household or trip** and type the code. They don't need a household, and they only ever see the trip.
+- Everyone can plan meals on the trip days, add and tick shopping items, and tap a meal or item to say **We'll cook it** / **We'll bring it**.
+- To put one of your recipes on the trip, tap **+ Add** on a trip day and pick it under *Or one of your recipes*. Only a copy of that recipe (ingredients and method) is shared.
+- **📅 Add ingredients for the trip's meals** (Shopping) builds the list, scaled to the number of people in all the families.
+- After the last day the other families are locked out automatically. You can still open it from **Settings**, change the dates to reopen it, or delete it.
+- **‹ Home** switches back to your own meal plan.
+
+---
+
 ## Everyday use
 
 | To… | Do this |

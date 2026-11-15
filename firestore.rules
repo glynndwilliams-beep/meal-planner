@@ -2,6 +2,10 @@ rules_version = '2';
 // Paste these into Firebase console > Firestore Database > Rules, then Publish.
 // Anyone signed in to the app can open a household only if they know its code;
 // nobody can list or browse other households.
+//
+// Trips are separate from households. Other families get the trip code only, so they
+// can never reach your recipes, plans or history. They can use the trip until its end
+// date (endsAt); after that only the organising household's phones can open it.
 service cloud.firestore {
   match /databases/{database}/documents {
     match /households/{code} {
@@ -11,6 +15,46 @@ service cloud.firestore {
       match /{collection}/{docId} {
         allow read, write: if request.auth != null
           && collection in ['meta', 'recipes', 'plans', 'shopping'];
+      }
+    }
+
+    function tripDoc(code) { return /databases/$(database)/documents/trips/$(code); }
+    function isOrganiser(code) {
+      return exists(/databases/$(database)/documents/trips/$(code)/organisers/$(request.auth.uid));
+    }
+    function tripOpen(code) { return request.time < get(tripDoc(code)).data.endsAt; }
+    function canUseTrip(code) {
+      return request.auth != null && exists(tripDoc(code)) && (tripOpen(code) || isOrganiser(code));
+    }
+
+    match /trips/{code} {
+      allow get: if request.auth != null && (request.time < resource.data.endsAt || isOrganiser(code));
+      allow list: if false;
+      // Anyone can start a trip (like a household); only its organisers can change dates or delete it.
+      allow create: if request.auth != null && request.resource.data.endsAt is timestamp;
+      allow update: if request.auth != null && isOrganiser(code) && request.resource.data.endsAt is timestamp;
+      allow delete: if request.auth != null && isOrganiser(code);
+
+      // The organisers' secret. Written once, when the trip is created; never readable.
+      match /private/{docId} {
+        allow read: if false;
+        allow create: if request.auth != null && docId == 'owner'
+          && !exists(tripDoc(code)) && existsAfter(tripDoc(code));
+        allow update: if false;
+        allow delete: if request.auth != null && isOrganiser(code);
+      }
+
+      // A phone becomes an organiser by showing the secret (only the household has it).
+      match /organisers/{uid} {
+        allow get: if request.auth != null && request.auth.uid == uid;
+        allow list: if false;
+        allow create, update: if request.auth != null && request.auth.uid == uid
+          && request.resource.data.key == getAfter(/databases/$(database)/documents/trips/$(code)/private/owner).data.key;
+        allow delete: if request.auth != null && isOrganiser(code);
+      }
+
+      match /{collection}/{docId} {
+        allow read, write: if collection in ['families', 'meals', 'recipes', 'shopping'] && canUseTrip(code);
       }
     }
   }
