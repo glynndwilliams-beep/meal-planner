@@ -337,3 +337,26 @@ ol.steps li { margin-bottom: 5px; }
 ol.steps .link-btn { padding: 0; }
 .tip code { font-size: 13px; background: var(--surface-2); padding: 1px 4px; border-radius: 4px; }
 .tip p { color: var(--text); }
+
+/* ---------- tablets and wider screens ----------
+   Phones are untouched. From 700px the content sits in a centred column whose
+   width suits each screen (render() sets body[data-tab]); the top bar and tab
+   bar line up with it, the week becomes a grid of days and recipes go two-up. */
+.week-grid { display: contents; }
+@media (min-width: 700px) {
+  :root { --content: 720px; }
+  body[data-tab="plan"], body[data-tab="recipes"] { --content: 1100px; }
+  main { width: 100%; max-width: var(--content); margin: 0 auto; padding-left: 24px; padding-right: 24px; }
+  .topbar { padding-left: max(24px, calc((100% - var(--content)) / 2 + 24px)); padding-right: max(24px, calc((100% - var(--content)) / 2 + 24px)); }
+  .tabbar { padding-left: max(4px, calc((100% - 720px) / 2)); padding-right: max(4px, calc((100% - 720px) / 2)); }
+  .tag-row { margin-left: 0; margin-right: 0; padding-left: 0; padding-right: 0; }
+
+  .week-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; align-items: start; }
+  .week-grid > .card { margin-bottom: 0; }
+
+  #recipe-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+  #recipe-list .recipe-item { border-top: 1px solid var(--line); margin-top: -1px; }
+  #recipe-list > .empty { grid-column: 1 / -1; }
+
+  .empty { padding: 72px 24px; }
+}

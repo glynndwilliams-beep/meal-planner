@@ -12,7 +12,7 @@ import { mountCropper } from './crop.js';
 import { importRecipe, findUrl, testRelay, makePageScript, readImportParam } from './web.js';
 import { setupTrips, myTrips, currentTripCode } from './trip.js';
 
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.8.0';
 
 const DAYS = [
   { key: 'mon', label: 'Monday' },
@@ -342,6 +342,7 @@ function setTabbar() {
 
 /* ---------------- rendering ---------------- */
 function render() {
+  document.body.dataset.tab = state.mode === 'trip' ? 'trip' : state.tab; // lets styles.css size each screen on tablets
   if (state.mode === 'trip') { trips.render(); return; }
   if (!state.store) return;
   document.querySelectorAll('.tabbar button').forEach(b => b.classList.toggle('active', b.dataset.tab === state.tab));
@@ -395,6 +396,7 @@ function renderPlan() {
     <button class="icon-btn" data-action="week" data-dir="1" aria-label="Next week">›</button></div>`;
   html += trips.planBannerHtml(state.week);
   let any = false;
+  html += '<div class="week-grid">';
   DAYS.forEach((d, i) => {
     const meals = MEALS.filter(m => state.settings.days[d.key][m]);
     if (!meals.length) return;
@@ -411,6 +413,7 @@ function renderPlan() {
     }
     html += '</div>';
   });
+  html += '</div>';
   if (!any) html += '<p class="empty"><span class="big">🗓️</span>No meals are switched on.<br>Choose days and meals in Settings.</p>';
   view.innerHTML = html;
 }
