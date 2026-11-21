@@ -72,7 +72,7 @@ export function setupTrips(ctx) {
     }
     ctx.setTabbar();
     ctx.render();
-    if (!quiet) window.scrollTo(0, 0);
+    if (!quiet) document.getElementById('view').scrollTop = 0;
   }
   const TRIP_READY = () => T() && ['root', ...TRIP_COLLECTIONS].every(c => T().loaded.has(c));
 
@@ -90,7 +90,7 @@ export function setupTrips(ctx) {
     state.tab = 'plan';
     ctx.setTabbar();
     if (state.store) ctx.render(); else ctx.renderWelcome();
-    window.scrollTo(0, 0);
+    document.getElementById('view').scrollTop = 0;
   }
 
   /* ---------------- rendering ---------------- */

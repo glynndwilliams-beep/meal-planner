@@ -12,7 +12,7 @@ import { mountCropper } from './crop.js';
 import { importRecipe, findUrl, testRelay, makePageScript, readImportParam } from './web.js';
 import { setupTrips, myTrips, currentTripCode } from './trip.js';
 
-const APP_VERSION = '1.8.0';
+const APP_VERSION = '1.8.1';
 
 const DAYS = [
   { key: 'mon', label: 'Monday' },
@@ -1185,8 +1185,10 @@ function openEditor(id, { onSaved, startUrl = '', startPage = null, startNote = 
           <label class="btn primary file-btn">📷 Take photo<input type="file" accept="image/*" capture="environment" data-scan></label>
           <label class="btn file-btn">🖼️ From photos<input type="file" accept="image/*" data-scan></label>
         </div>
-        ${isIOS ? `<details class="small tip"><summary>Tip: the iPhone’s own <b>Scan Text</b> is even more accurate</summary>
-          Tap in the <b>Ingredients</b> or <b>Method</b> box below, then tap it again (or touch and hold) and choose <b>Scan Text</b> – you may need to tap <b>›</b> to find it. Point the camera at the page, wait for the text to highlight, then tap <b>Insert</b>.</details>`
+        ${isIOS ? `<div class="notice stack" style="gap:8px">
+          <div class="small"><b>Most accurate: the iPhone’s own Scan Text.</b> Tap a button, then tap the box again and choose <b>Scan Text</b> (on newer iPhones it’s inside <b>AutoFill</b>; you may need to tap <b>›</b> first). Point the camera at the page, wait for the text to highlight, then tap <b>Insert</b>.</div>
+          <div class="scan-buttons"><button type="button" class="btn" data-act="scan-ings">📝 Scan ingredients</button><button type="button" class="btn" data-act="scan-method">📝 Scan method</button></div>
+          <div class="small muted">Already have a photo? Open it in the Photos app, touch and hold the text, tap <b>Select All</b> › <b>Copy</b>, then paste it in the box.</div></div>`
         : isAndroid ? `<details class="small tip"><summary>Tip: <b>Google Lens</b> can copy text from a page too</summary>
           Open <b>Google Lens</b> (in the Google app, or the camera on many phones), point it at the page, tap <b>Text</b>, select the ingredients or method and tap <b>Copy</b>. Then touch and hold in the <b>Ingredients</b> or <b>Method</b> box below and choose <b>Paste</b>.</details>` : ''}
         <div id="crop-panel" class="stack" hidden></div>
@@ -1350,6 +1352,13 @@ function openEditor(id, { onSaved, startUrl = '', startPage = null, startNote = 
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (act === 'import-url') importUrl();
     if (act === 'paste-url') pasteUrl();
+    if (act === 'scan-ings' || act === 'scan-method') {
+      // Live Text can't be opened from a web page, so put the cursor in the box
+      // and bring up the keyboard – one more tap on the box shows Scan Text.
+      const box = field(act === 'scan-ings' ? '#ed-ings' : '#ed-method');
+      box.focus();
+      box.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
     const addTag = e.target.closest('[data-addtag]');
     if (addTag) {
       const have = field('#ed-tags').value.split(',').map(t => t.trim()).filter(Boolean);
@@ -1545,7 +1554,7 @@ document.addEventListener('click', async e => {
   if (tabBtn) {
     state.tab = tabBtn.dataset.tab;
     render();
-    window.scrollTo(0, 0);
+    document.getElementById('view').scrollTop = 0;
     return;
   }
   if (e.target.id === 'sheet-backdrop') { closeSheet(); return; }
