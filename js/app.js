@@ -12,7 +12,7 @@ import { mountCropper } from './crop.js';
 import { importRecipe, findUrl, testRelay, makePageScript, readImportParam } from './web.js';
 import { setupTrips, myTrips, currentTripCode } from './trip.js';
 
-const APP_VERSION = '1.8.1';
+const APP_VERSION = '1.8.2';
 
 const DAYS = [
   { key: 'mon', label: 'Monday' },
@@ -1182,8 +1182,8 @@ function openEditor(id, { onSaved, startUrl = '', startPage = null, startNote = 
       <div class="card" style="margin:0"><div class="card-body stack">
         <div class="small muted">Or photograph the recipe in good light with the phone flat above the page, then box in just the text. You can scan several parts – each is added below for you to check.</div>
         <div class="scan-buttons">
-          <label class="btn primary file-btn">📷 Take photo<input type="file" accept="image/*" capture="environment" data-scan></label>
-          <label class="btn file-btn">🖼️ From photos<input type="file" accept="image/*" data-scan></label>
+          <label class="btn primary file-btn">📷 Scan recipe page<input type="file" accept="image/*" capture="environment" data-scan></label>
+          <label class="btn file-btn">🖼️ Scan from photos<input type="file" accept="image/*" data-scan></label>
         </div>
         ${isIOS ? `<div class="notice stack" style="gap:8px">
           <div class="small"><b>Most accurate: the iPhone’s own Scan Text.</b> Tap a button, then tap the box again and choose <b>Scan Text</b> (on newer iPhones it’s inside <b>AutoFill</b>; you may need to tap <b>›</b> first). Point the camera at the page, wait for the text to highlight, then tap <b>Insert</b>.</div>
@@ -1369,6 +1369,8 @@ function openEditor(id, { onSaved, startUrl = '', startPage = null, startNote = 
     if (act === 'save') {
       const title = field('#ed-title').value.trim();
       if (!title) { toast('Please give the recipe a name'); field('#ed-title').focus(); return; }
+      // A photo taken with Scan but never read is still the only picture: keep it rather than drop it.
+      if (!photo && pending) { try { photo = await makeThumbnail(pending.file); } catch (err) { console.error(err); } }
       const rid = id || newId();
       await state.store.set('recipes', rid, {
         title,

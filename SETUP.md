@@ -115,7 +115,7 @@ The fetcher only answers your app's own web address, only fetches web pages and 
 | Plan a meal | **Plan** tab → **+ Add** on a day → pick a recipe, or type something like "Takeaway" |
 | Change which days/meals appear | **Settings** → tick or untick in *Meals to plan* |
 | See other weeks | **‹ ›** arrows at the top of the Plan |
-| Scan a recipe | **Recipes** → **+ New** → **📷 Take photo**. Scan extra pages the same way; each is added below. Check the text, fix any mistakes, then **Save**. |
+| Scan a recipe | **Recipes** → **+ New** → **📷 Scan recipe page**. Scan extra pages the same way; each is added below. Check the text, fix any mistakes, then **Save**. |
 | Add a recipe from a website | On the recipe page tap **Share → Copy** (Safari) or **⋮ → Share → Copy** (Chrome on Android), or copy the address bar. Then **Recipes** → **+ New** → paste into the box at the top → **Get recipe**. Check it, then **Save**. Works with BBC Food, BBC Good Food and most recipe sites. |
 | Add a recipe from the Share menu | **iPhone:** set up the *Add to Meals* Shortcut once (steps in **Settings → Recipes from websites**). It reads the recipe straight off the page, so it works even on sites that block fetching, like BBC. Then on a recipe in Safari tap **Share → Add to Meals**. It opens the app in Safari with the recipe filled in – tap **Save**. The first time, join your household there with your code, and tap **Always Allow** when it asks to run on a new site. **Android:** once the app is installed, tap **Share → Meals** on any recipe page. |
 | Paste a copied link | **Recipes → + New → 📋 Paste link & get recipe**. |
